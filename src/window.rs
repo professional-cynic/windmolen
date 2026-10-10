@@ -25,7 +25,7 @@ fn install_state() -> Option<bool> {
 }
 use crate::wic::WM_DECODED;
 
-const CLASS: PCWSTR = w!("HetPlantsoen.Window");
+const CLASS: PCWSTR = w!("Windmolen.Window");
 const TIMER: usize = 1;
 
 struct Host {
@@ -86,7 +86,7 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             CLASS,
-            w!("Het Plantsoen"),
+            w!("Windmolen"),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -181,7 +181,7 @@ impl Host {
 
     /// Window icons for the taskbar and Alt+Tab, at the current DPI.
     fn set_icons(&self, hwnd: HWND) {
-        static PNG: &[u8] = include_bytes!("../res/het-plantsoen.png");
+        static PNG: &[u8] = include_bytes!("../res/windmolen.png");
         // SAFETY: PNG data in icon-resource form; handles are freed later.
         unsafe {
             let dpi = GetDpiForWindow(hwnd);
@@ -284,7 +284,7 @@ impl Host {
                         self.with(|a| {
                             a.installed = install_state();
                             match &result {
-                                Ok(_) => a.show_toast("Installed — choose Het Plantsoen as the default in Settings"),
+                                Ok(_) => a.show_toast("Installed — choose Windmolen as the default in Settings"),
                                 Err(e) => a.show_toast(&format!("Could not install: {e}")),
                             }
                         });

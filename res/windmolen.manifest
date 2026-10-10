@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="HetPlantsoen" version="0.1.0.0"/>
+  <assemblyIdentity type="win32" name="Windmolen" version="0.1.0.0"/>
   <!-- Never ask for elevation: the viewer runs with the user's own rights. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>

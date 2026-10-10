@@ -186,7 +186,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
                 let sel = if app.selection { " selected" } else { "" };
                 (file_name(p), Some(format!("{} of {}{sel}", app.index + 1, app.files.len())))
             }
-            None => ("Het Plantsoen".to_owned(), None),
+            None => ("Windmolen".to_owned(), None),
         }
     };
 
@@ -221,7 +221,7 @@ fn banner(app: &App, ui: &mut Ui) {
     let bw = ui.text_width(label, TextStyle::Heading) + 34.0;
     let b = Rect::new(r.right() - 12.0 - bw, r.y + (BANNER_H - BTN) / 2.0, bw, BTN);
     ui.button(b, Action::Restart, Content::Label(label), Style::Suggested, t.window_fg, true, false, None);
-    let text = format!("Het Plantsoen {v} has been installed");
+    let text = format!("Windmolen {v} has been installed");
     ui.text(Rect::new(12.0 + bw, r.y, (r.w - 2.0 * (bw + 24.0)).max(0.0), BANNER_H), text, TextStyle::Body, t.window_fg, Align::Centre);
 }
 
@@ -623,7 +623,7 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
             });
             v.push(Item::Separator);
             v.push(entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")));
-            v.push(entry(Action::About, "About Het Plantsoen", None));
+            v.push(entry(Action::About, "About Windmolen", None));
             (anchors.main, v, false)
         }
         Popover::Marks => {
@@ -811,7 +811,7 @@ fn alert_body(app: &App, d: Dialog) -> (String, String) {
             }
         }
         Dialog::Install => (
-            if app.installed == Some(false) { "Update Installation?" } else { "Install Het Plantsoen?" }.into(),
+            if app.installed == Some(false) { "Update Installation?" } else { "Install Windmolen?" }.into(),
             "It is copied to your user folder and added to the Start menu, to Open with and to the right-click menu of images. No administrator rights are needed.\n\nWindows then asks you to confirm it as your default image viewer in Settings."
                 .into(),
         ),
@@ -911,7 +911,7 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             ui.fill(icon, 24.0, t.accent_bg);
             ui.icon(Icon::Image, icon.centred(56.0, 56.0), t.accent_fg);
             y += 96.0 + 18.0;
-            ui.text(Rect::new(r.x, y, r.w, 36.0), "Het Plantsoen", TextStyle::Title1, fg, Align::Centre);
+            ui.text(Rect::new(r.x, y, r.w, 36.0), "Windmolen", TextStyle::Title1, fg, Align::Centre);
             y += 38.0;
             // The developer's name links to their profile, as in AdwAboutDialog.
             let dev = crate::release::OWNER;

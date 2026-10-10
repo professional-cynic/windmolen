@@ -20,12 +20,12 @@ use windows::core::{HSTRING, Interface, PCWSTR, w};
 
 use crate::sys;
 
-const NAME: &str = "Het Plantsoen";
-const EXE: &str = "het-plantsoen.exe";
-const APP_KEY: &str = r"Software\HetPlantsoen";
+const NAME: &str = "Windmolen";
+const EXE: &str = "windmolen.exe";
+const APP_KEY: &str = r"Software\Windmolen";
 const CLASSES: &str = r"Software\Classes";
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\HetPlantsoen";
-const VERB: &str = "HetPlantsoen";
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Windmolen";
+const VERB: &str = "Windmolen";
 
 /// An open HKCU key, closed on drop.
 struct Key(HKEY);
@@ -143,7 +143,7 @@ fn place_executable(dir: &Path) -> Result<PathBuf, String> {
     let same = std::fs::canonicalize(&src).ok().zip(std::fs::canonicalize(&dst).ok()).is_some_and(|(a, b)| a == b);
     if !same {
         if dst.exists() {
-            let old = dir.join(format!("het-plantsoen.old-{}.exe", std::process::id()));
+            let old = dir.join(format!("windmolen.old-{}.exe", std::process::id()));
             std::fs::rename(&dst, &old).map_err(|e| format!("Could not replace the installed copy: {e}"))?;
         }
         std::fs::copy(&src, &dst).map_err(|e| format!("Could not copy the program: {e}"))?;
@@ -151,7 +151,7 @@ fn place_executable(dir: &Path) -> Result<PathBuf, String> {
     // Leftovers from earlier updates whose process has since exited.
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            if e.file_name().to_string_lossy().starts_with("het-plantsoen.old-") {
+            if e.file_name().to_string_lossy().starts_with("windmolen.old-") {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -162,7 +162,7 @@ fn place_executable(dir: &Path) -> Result<PathBuf, String> {
 fn unregister_extensions() {
     let Some(list) = read_string(APP_KEY, "Extensions") else { return };
     for ext in list.split(';').filter(|e| !e.is_empty()) {
-        let progid = format!("HetPlantsoen.{ext}");
+        let progid = format!("Windmolen.{ext}");
         delete_value(&format!(r"{CLASSES}\.{ext}\OpenWithProgids"), &progid);
         delete_tree(&format!(r"{CLASSES}\{progid}"));
         delete_tree(&format!(r"{CLASSES}\SystemFileAssociations\.{ext}\shell\{VERB}"));
@@ -187,7 +187,7 @@ fn register(exe: &Path, exts: &[String]) -> Result<(), String> {
     set(&caps, "ApplicationIcon", &icon)?;
 
     for ext in &exts {
-        let progid = format!("HetPlantsoen.{ext}");
+        let progid = format!("Windmolen.{ext}");
         let pk = format!(r"{CLASSES}\{progid}");
         let type_name = format!("{} Image", ext.to_uppercase());
         set(&pk, "", &type_name)?;
@@ -199,7 +199,7 @@ fn register(exe: &Path, exts: &[String]) -> Result<(), String> {
         set(&format!(r"{app}\SupportedTypes"), &format!(".{ext}"), "")?;
         set(&format!(r"{caps}\FileAssociations"), &format!(".{ext}"), &progid)?;
 
-        // Right-click › "Open in Het Plantsoen", for any number of files.
+        // Right-click › "Open in Windmolen", for any number of files.
         let verb = format!(r"{CLASSES}\SystemFileAssociations\.{ext}\shell\{VERB}");
         set(&verb, "", &format!("Open in {NAME}"))?;
         set(&verb, "Icon", &icon)?;
@@ -282,12 +282,12 @@ pub fn uninstall() -> Result<(), String> {
         }
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let script = format!("/c ping -n 3 127.0.0.1 >nul & del /f /q \"{d}\\het-plantsoen*.exe\" & rmdir \"{d}\"");
+        let script = format!("/c ping -n 3 127.0.0.1 >nul & del /f /q \"{d}\\windmolen*.exe\" & rmdir \"{d}\"");
         std::process::Command::new("cmd.exe").raw_arg(script).creation_flags(CREATE_NO_WINDOW).spawn().map_err(|e| e.to_string())?;
     } else {
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for e in rd.flatten() {
-                if e.file_name().to_string_lossy().starts_with("het-plantsoen") {
+                if e.file_name().to_string_lossy().starts_with("windmolen") {
                     let _ = std::fs::remove_file(e.path());
                 }
             }
@@ -299,7 +299,7 @@ pub fn uninstall() -> Result<(), String> {
 
 /// Opens Settings › Default apps, on the app's own page where supported.
 pub fn open_default_apps() {
-    if !sys::shell_open("ms-settings:defaultapps?registeredAppUser=Het%20Plantsoen") {
+    if !sys::shell_open("ms-settings:defaultapps?registeredAppUser=Windmolen") {
         sys::shell_open("ms-settings:defaultapps");
     }
 }

@@ -34,7 +34,7 @@ const ANIM: Duration = Duration::from_millis(180);
 const OSD_IDLE: Duration = Duration::from_secs(2);
 const TOAST_TIME: Duration = Duration::from_secs(3);
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
-const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\HetPlantsoen.Settings");
+const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\Windmolen.Settings");
 
 /// Work the host must do after releasing the app.
 pub enum Effect {
@@ -519,7 +519,7 @@ impl App {
             self.cache.clear();
             self.index = 0;
             self.dirty = true;
-            return vec![Effect::Title("Het Plantsoen".into())];
+            return vec![Effect::Title("Windmolen".into())];
         }
         let i = cur.and_then(|c| self.files.iter().position(|p| *p == c)).unwrap_or(self.index.min(self.files.len() - 1));
         self.index = usize::MAX;
@@ -542,7 +542,7 @@ impl App {
         self.request_decodes();
         self.dirty = true;
         let name = self.current().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        vec![Effect::Title(format!("{name} – Het Plantsoen"))]
+        vec![Effect::Title(format!("{name} – Windmolen"))]
     }
 
     fn step(&mut self, d: isize) -> Vec<Effect> {
@@ -942,7 +942,7 @@ impl App {
                     self.update = UpdateState::Idle;
                     match outcome {
                         crate::update::Outcome::Ready(v) => self.update = UpdateState::Ready(v),
-                        crate::update::Outcome::UpToDate if manual => self.show_toast("Het Plantsoen is up to date"),
+                        crate::update::Outcome::UpToDate if manual => self.show_toast("Windmolen is up to date"),
                         crate::update::Outcome::Failed(e) if manual => self.show_toast(&format!("Could not update: {e}")),
                         _ => {}
                     }

@@ -128,9 +128,9 @@ pub fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
     unsafe { SHGetKnownFolderPath(id, KF_FLAG_CREATE, None) }.ok().and_then(take_pwstr).map(PathBuf::from)
 }
 
-/// `%APPDATA%\Het Plantsoen\settings.txt` (per user, no elevation needed).
+/// `%APPDATA%\Windmolen\settings.txt` (per user, no elevation needed).
 pub fn settings_path() -> Option<PathBuf> {
-    Some(known_folder(&FOLDERID_RoamingAppData)?.join("Het Plantsoen").join("settings.txt"))
+    Some(known_folder(&FOLDERID_RoamingAppData)?.join("Windmolen").join("settings.txt"))
 }
 
 /// A session-wide named mutex, released on drop.
@@ -330,7 +330,7 @@ pub fn temp_beside(near: &Path) -> std::io::Result<PathBuf> {
     let dir = near.parent().unwrap_or(Path::new("."));
     loop {
         let n = N.fetch_add(1, Ordering::Relaxed);
-        let p = dir.join(format!(".het-plantsoen-{}-{n}.tmp", std::process::id()));
+        let p = dir.join(format!(".windmolen-{}-{n}.tmp", std::process::id()));
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
             Ok(_) => return Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

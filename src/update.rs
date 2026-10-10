@@ -47,7 +47,7 @@ impl Drop for Handle {
 /// HTTPS GET on github.com, following redirects (HTTPS only) to GitHub's
 /// asset host. Fails on non-200 status or more than `limit` bytes.
 fn get(path: &str, limit: usize) -> Result<Vec<u8>, String> {
-    let ua = HSTRING::from(format!("HetPlantsoen/{}", env!("CARGO_PKG_VERSION")));
+    let ua = HSTRING::from(format!("Windmolen/{}", env!("CARGO_PKG_VERSION")));
     // SAFETY: WinHTTP calls on handles owned by `Handle` guards; buffers
     // are locals sized as passed.
     unsafe {
@@ -125,7 +125,7 @@ fn old_name(exe: &Path) -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed);
-    exe.with_file_name(format!("het-plantsoen.old-{}-{n}.exe", std::process::id()))
+    exe.with_file_name(format!("windmolen.old-{}-{n}.exe", std::process::id()))
 }
 
 /// Checks for a newer release and, if there is one, installs it.
@@ -150,7 +150,7 @@ fn try_run() -> Result<Outcome, String> {
         return Ok(Outcome::Ready(version));
     }
 
-    let data = get(&release::latest_asset("het-plantsoen.exe"), MAX_EXECUTABLE)?;
+    let data = get(&release::latest_asset("windmolen.exe"), MAX_EXECUTABLE)?;
     if sha256(&data)? != m.sha256 {
         return Err("The download did not match the published checksum".into());
     }
@@ -173,7 +173,7 @@ pub fn clean_up() {
     for e in rd.flatten() {
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with("het-plantsoen.old-") && name.ends_with(".exe") {
+        if name.starts_with("windmolen.old-") && name.ends_with(".exe") {
             let _ = std::fs::remove_file(e.path());
         }
     }

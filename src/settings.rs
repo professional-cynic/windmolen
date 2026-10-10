@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 pub const SLOTS: usize = 9;
-const HEADER: &str = "het-plantsoen 1";
+const HEADER: &str = "windmolen 1";
 const MAX_FILE_SIZE: u64 = 32 * 1024 * 1024;
 
 /// Window placement: normal-position rectangle and maximised flag.
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn rejects_hostile_input() {
-        let t = "het-plantsoen 1\nmark\tC:\\x\t..\\..\\evil\t1\nmark\tC:\\x\tok.jpg\tnope\ndir\t0\tX\ndir\t10\tY\nwindow\t1\t2\t-3\t4\t0\n";
+        let t = "windmolen 1\nmark\tC:\\x\t..\\..\\evil\t1\nmark\tC:\\x\tok.jpg\tnope\ndir\t0\tX\ndir\t10\tY\nwindow\t1\t2\t-3\t4\t0\n";
         let s = Settings::parse(t);
         assert!(s.marked().is_empty());
         assert!(s.mark_dirs.iter().all(Option::is_none));

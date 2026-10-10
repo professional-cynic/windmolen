@@ -2,7 +2,7 @@
 #   1. bump `version` in Cargo.toml and commit
 #   2. git tag v0.2.0 && git push origin v0.2.0
 #
-# The release carries het-plantsoen.exe and latest.txt (version + SHA-256),
+# The release carries windmolen.exe and latest.txt (version + SHA-256),
 # which the app's updater reads.
 name: Release
 
@@ -50,17 +50,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/het-plantsoen.exe dist/
-          $hash = (Get-FileHash dist/het-plantsoen.exe -Algorithm SHA256).Hash.ToLower()
+          Copy-Item target/release/windmolen.exe dist/
+          $hash = (Get-FileHash dist/windmolen.exe -Algorithm SHA256).Hash.ToLower()
           [IO.File]::WriteAllText("dist/latest.txt", "$env:VERSION`n$hash`n")
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/het-plantsoen.exe
+          subject-path: dist/windmolen.exe
 
       - name: Publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:TAG dist/het-plantsoen.exe dist/latest.txt --verify-tag --generate-notes --title "Het Plantsoen $env:VERSION"
+        run: gh release create $env:TAG dist/windmolen.exe dist/latest.txt --verify-tag --generate-notes --title "Windmolen $env:VERSION"

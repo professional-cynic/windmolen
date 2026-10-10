@@ -20,10 +20,10 @@ use windows::core::{PCWSTR, w};
 
 use crate::sys::NamedMutex;
 
-const CLASS: PCWSTR = w!("HetPlantsoen.Gather");
-const LOCK: PCWSTR = w!("Local\\HetPlantsoen.Launch");
-/// Tag identifying our `WM_COPYDATA` payload ("HPls").
-const TAG: usize = 0x4850_6C73;
+const CLASS: PCWSTR = w!("Windmolen.Gather");
+const LOCK: PCWSTR = w!("Local\\Windmolen.Launch");
+/// Tag identifying our `WM_COPYDATA` payload ("Wmln").
+const TAG: usize = 0x576D_6C6E;
 const MAX_PAYLOAD: u32 = 1 << 20;
 /// Stay open at least this long after start …
 const MIN_OPEN: Duration = Duration::from_millis(1500);

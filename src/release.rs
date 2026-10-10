@@ -4,11 +4,11 @@
 //!
 //! ```text
 //! 0.2.0
-//! <sha-256 of het-plantsoen.exe, 64 lower-case hex digits>
+//! <sha-256 of windmolen.exe, 64 lower-case hex digits>
 //! ```
 
 pub const OWNER: &str = "professional-cynic";
-pub const REPO: &str = "het-plantsoen";
+pub const REPO: &str = "windmolen";
 
 pub fn profile_url() -> String {
     format!("https://github.com/{OWNER}")

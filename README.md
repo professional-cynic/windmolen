@@ -1,8 +1,8 @@
-# Het Plantsoen
+# Windmolen
 
 A lean, fast photo viewer for Windows, designed after the GNOME HIG and
 libadwaita (colours, type scale, header bar, status pages, boxed lists,
-popovers, dialogs, toasts). `het-plantsoen.html` is the original prototype.
+popovers, dialogs, toasts). `prototype.html` is the original HTML prototype.
 
 - **One dependency:** Microsoft's own [`windows`](https://github.com/microsoft/windows-rs)
   crate (plus its `windows-numerics` companion). The UI toolkit, layout, icons and
@@ -10,7 +10,7 @@ popovers, dialogs, toasts). `het-plantsoen.html` is the original prototype.
 - **Native stack:** Win32 window with client-side decorations, Direct2D/DirectWrite
   rendering, and the Windows Imaging Component (WIC) for decoding and encoding.
 - **No admin rights:** the manifest declares `asInvoker`, and settings live in
-  `%APPDATA%\Het Plantsoen\settings.txt`. Nothing is written to HKLM or Program Files.
+  `%APPDATA%\Windmolen\settings.txt`. Nothing is written to HKLM or Program Files.
 - **Small:** a ~750 KB executable, about 6 000 lines of Rust including tests.
 
 ## Formats
@@ -48,23 +48,23 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 
 ## Installing
 
-Open the main menu › **Install…**, or run `het-plantsoen.exe --install`.
+Open the main menu › **Install…**, or run `windmolen.exe --install`.
 Everything is per user, so no administrator rights are needed:
 
-- The program is copied to `%LOCALAPPDATA%\Programs\Het Plantsoen` and gets a Start menu shortcut.
+- The program is copied to `%LOCALAPPDATA%\Programs\Windmolen` and gets a Start menu shortcut.
 - It is registered for every format WIC can currently decode:
   - per-format ProgIDs and **Open with** entries;
-  - a right-click **Open in Het Plantsoen** verb that accepts multiple files;
+  - a right-click **Open in Windmolen** verb that accepts multiple files;
   - Default-apps capabilities and an entry in Settings › Apps (which uninstalls it).
 - Windows doesn't let any app make itself the default. Installing opens Settings ›
-  Default apps on Het Plantsoen's page, where you confirm it.
+  Default apps on Windmolen's page, where you confirm it.
 - Running **Install…** again from a newer build updates the installed copy, even while it is running.
 - After installing new Store codecs (HEIC, WebP, …), run **Update Installation…** so those formats are registered too.
 - Uninstalling keeps your marks and settings in `%APPDATA%`.
 
 ### One window per action
 
-Opening several selected files (Enter, right-click › Open in Het Plantsoen,
+Opening several selected files (Enter, right-click › Open in Windmolen,
 or Open with) shows them together in one window as a selection ("2 of 4
 selected"). Opening a file on its own browses its folder in a new window.
 
@@ -81,7 +81,7 @@ most once a day. **Check for Updates…** checks immediately. Each check:
 
 1. Reads the latest release's `latest.txt` from `github.com` over HTTPS, using
    Windows' own WinHTTP and TLS stack.
-2. If that release is newer, downloads `het-plantsoen.exe` and verifies its SHA-256
+2. If that release is newer, downloads `windmolen.exe` and verifies its SHA-256
    against `latest.txt` with Windows' BCrypt.
 3. Swaps the new file in next to the running one. The running program keeps going,
    and a banner offers **Restart**.
@@ -93,7 +93,7 @@ download request.
 The checksum guards against corrupted or truncated downloads; authenticity comes
 from HTTPS to github.com and the release being yours. Every release also gets a
 signed build-provenance attestation, which you can check with
-`gh attestation verify het-plantsoen.exe -R professional-cynic/het-plantsoen`.
+`gh attestation verify windmolen.exe -R professional-cynic/windmolen`.
 For protection even against a compromised GitHub account, releases would need
 offline code signing (Authenticode), which needs a certificate.
 
@@ -104,7 +104,7 @@ offline code signing (Authenticode), which needs a certificate.
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, runs the
 tests, builds with MSVC (manifest and Explorer icon included), attests the build
-and publishes `het-plantsoen.exe` and `latest.txt` as a GitHub Release.
+and publishes `windmolen.exe` and `latest.txt` as a GitHub Release.
 `ci.yml` runs Clippy and the tests on every push to `main`.
 
 ## Keyboard
@@ -132,7 +132,7 @@ rustup default stable-x86_64-pc-windows-gnu     # or -msvc
 cargo build --release
 ```
 
-`target\release\het-plantsoen.exe` is self-contained; copy it anywhere.
+`target\release\windmolen.exe` is self-contained; copy it anywhere.
 
 - **GNU toolchain:** `build.rs` embeds the manifest and Explorer icon via `windres`
   (set `WINDRES` if it isn't on `PATH`). Without `windres` the app still runs, minus

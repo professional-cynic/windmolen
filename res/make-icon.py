@@ -2,9 +2,9 @@
 # requires-python = ">=3.9"
 # dependencies = []
 # ///
-"""Renders the Het Plantsoen app icon (256×256 RGBA PNG) without dependencies.
+"""Renders the Windmolen app icon (256×256 RGBA PNG) without dependencies.
 
-Usage: uv run res/make-icon.py res/het-plantsoen.png
+Usage: uv run res/make-icon.py res/windmolen.png
 """
 import struct, sys, zlib
 
