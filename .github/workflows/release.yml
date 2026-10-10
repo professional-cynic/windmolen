@@ -1,0 +1,66 @@
+# Publishes a release when a version tag is pushed:
+#   1. bump `version` in Cargo.toml and commit
+#   2. git tag v0.2.0 && git push origin v0.2.0
+#
+# The release carries het-plantsoen.exe and latest.txt (version + SHA-256),
+# which the app's updater reads.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # create the release
+  id-token: write # sign the build provenance
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches Cargo.toml
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(\d+\.\d+\.\d+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ("v$version" -ne $env:TAG) { throw "Tag $env:TAG does not match Cargo.toml version $version" }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Update Rust
+        run: rustup update stable --no-self-update
+
+      - name: Locate the resource compiler (Explorer icon)
+        shell: pwsh
+        run: |
+          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\rc.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $rc) { throw "rc.exe not found" }
+          "RC=$($rc.FullName)" >> $env:GITHUB_ENV
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/het-plantsoen.exe dist/
+          $hash = (Get-FileHash dist/het-plantsoen.exe -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("dist/latest.txt", "$env:VERSION`n$hash`n")
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/het-plantsoen.exe
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:TAG dist/het-plantsoen.exe dist/latest.txt --verify-tag --generate-notes --title "Het Plantsoen $env:VERSION"

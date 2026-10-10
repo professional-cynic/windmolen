@@ -6,6 +6,7 @@ mod edit;
 mod geom;
 mod icons;
 mod meta;
+mod release;
 mod settings;
 mod theme;
 mod ui;
@@ -20,6 +21,8 @@ mod instance;
 mod render;
 #[cfg(windows)]
 mod sys;
+#[cfg(windows)]
+mod update;
 #[cfg(windows)]
 mod view;
 #[cfg(windows)]

@@ -74,6 +74,39 @@ arriving. Those processes hand their file over and exit. Files opened separately
 more than a moment apart get their own window. Several windows can be open at
 once; marks and settings are shared safely between them.
 
+## Updates
+
+With **Automatic Updates** on (main menu; on by default), the app checks GitHub at
+most once a day. **Check for Updates…** checks immediately. Each check:
+
+1. Reads the latest release's `latest.txt` from `github.com` over HTTPS, using
+   Windows' own WinHTTP and TLS stack.
+2. If that release is newer, downloads `het-plantsoen.exe` and verifies its SHA-256
+   against `latest.txt` with Windows' BCrypt.
+3. Swaps the new file in next to the running one. The running program keeps going,
+   and a banner offers **Restart**.
+
+Without a restart, the new version is used the next time the app starts. This
+works for installed and portable copies alike. Nothing is sent beyond a normal
+download request.
+
+The checksum guards against corrupted or truncated downloads; authenticity comes
+from HTTPS to github.com and the release being yours. Every release also gets a
+signed build-provenance attestation, which you can check with
+`gh attestation verify het-plantsoen.exe -R professional-cynic/het-plantsoen`.
+For protection even against a compromised GitHub account, releases would need
+offline code signing (Authenticode), which needs a certificate.
+
+## Releasing
+
+1. Bump `version` in `Cargo.toml` (`MAJOR.MINOR.PATCH`), commit and push.
+2. `git tag v0.2.0 && git push origin v0.2.0`
+
+`.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, runs the
+tests, builds with MSVC (manifest and Explorer icon included), attests the build
+and publishes `het-plantsoen.exe` and `latest.txt` as a GitHub Release.
+`ci.yml` runs Clippy and the tests on every push to `main`.
+
 ## Keyboard
 
 | | |

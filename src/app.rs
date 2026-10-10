@@ -26,6 +26,8 @@ pub const WM_TASK: u32 = WM_APP + 2;
 pub const HEADER_H: f32 = 47.0;
 pub const SIDEBAR_W: f32 = 320.0;
 pub const TOOLBAR_H: f32 = 47.0;
+pub const BANNER_H: f32 = 46.0;
+const UPDATE_INTERVAL: u64 = 24 * 60 * 60;
 const ZOOM_STEP: f32 = 1.25;
 const MAX_ZOOM: f32 = 32.0;
 const ANIM: Duration = Duration::from_millis(180);
@@ -45,6 +47,17 @@ pub enum Effect {
     Title(String),
     Install,
     DefaultApps,
+    OpenUrl(String),
+    /// Starts the (updated) program again with the current file, then closes.
+    Restart(Option<PathBuf>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateState {
+    Idle,
+    Checking { manual: bool },
+    /// Installed; takes effect after a restart.
+    Ready(String),
 }
 
 pub struct Loaded {
@@ -113,6 +126,7 @@ pub struct Toast {
 }
 
 pub enum TaskMsg {
+    Update { outcome: crate::update::Outcome, manual: bool },
     Progress(String),
     Sent { mode: SendMode, done: Vec<(PathBuf, OsString, u16)>, missing: Vec<(PathBuf, OsString)>, failed: Vec<String> },
     Saved { result: Result<PathBuf, String>, replaced: bool },
@@ -136,6 +150,7 @@ pub struct App {
     pub busy: bool,
     /// Whether an installed copy exists, and whether this is it.
     pub installed: Option<bool>,
+    pub update: UpdateState,
 
     pub settings: Settings,
     settings_path: Option<PathBuf>,
@@ -208,6 +223,7 @@ impl App {
             task_rx,
             busy: false,
             installed: None,
+            update: UpdateState::Idle,
             settings,
             settings_path,
             theme: Self::system_theme(),
@@ -294,13 +310,22 @@ impl App {
             || (self.mouse_inside && self.mouse.1 < HEADER_H && self.pan.is_none())
     }
 
+    pub fn banner_visible(&self) -> bool {
+        matches!(self.update, UpdateState::Ready(_)) && !self.fullscreen && self.edit.is_none()
+    }
+
+    /// Top of the content area: below the header bar and any banner.
+    pub fn content_top(&self) -> f32 {
+        self.header_h() + if self.banner_visible() { BANNER_H } else { 0.0 }
+    }
+
     pub fn sidebar_open(&self) -> bool {
         self.settings.properties && self.edit.is_none() && self.loaded().is_some() && self.width() >= 600.0
     }
 
     /// Area the image is shown in (view mode).
     pub fn viewport(&self) -> Rect {
-        let top = if self.edit.is_some() && self.fullscreen { HEADER_H } else { self.header_h() };
+        let top = if self.edit.is_some() && self.fullscreen { HEADER_H } else { self.content_top() };
         let right = if self.sidebar_open() { SIDEBAR_W } else { 0.0 };
         Rect::new(0.0, top, (self.width() - right).max(1.0), (self.height() - top).max(1.0))
     }
@@ -856,6 +881,34 @@ impl App {
         });
     }
 
+    /// Looks for a newer release in the background.
+    pub fn check_for_updates(&mut self, manual: bool) {
+        if matches!(self.update, UpdateState::Checking { .. } | UpdateState::Ready(_)) {
+            if manual && matches!(self.update, UpdateState::Ready(_)) {
+                self.show_toast("An update is ready — restart to use it");
+            }
+            return;
+        }
+        self.update = UpdateState::Checking { manual };
+        if manual {
+            self.show_sticky("Checking for updates…");
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.update_settings(|st| st.last_update_check = now);
+        self.spawn(move |tx| {
+            let outcome = crate::update::run();
+            let _ = tx.send(TaskMsg::Update { outcome, manual });
+        });
+    }
+
+    /// Daily automatic check, if enabled.
+    pub fn maybe_check_for_updates(&mut self) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        if self.settings.auto_update && now.saturating_sub(self.settings.last_update_check) >= UPDATE_INTERVAL {
+            self.check_for_updates(false);
+        }
+    }
+
     fn spawn(&self, f: impl FnOnce(Sender<TaskMsg>) + Send + 'static) {
         let tx = self.task_tx.clone();
         let hwnd = self.hwnd.0 as isize;
@@ -882,6 +935,18 @@ impl App {
         while let Ok(m) = self.task_rx.try_recv() {
             match m {
                 TaskMsg::Progress(s) => self.show_sticky(&s),
+                TaskMsg::Update { outcome, manual } => {
+                    if manual {
+                        self.toast = None;
+                    }
+                    self.update = UpdateState::Idle;
+                    match outcome {
+                        crate::update::Outcome::Ready(v) => self.update = UpdateState::Ready(v),
+                        crate::update::Outcome::UpToDate if manual => self.show_toast("Het Plantsoen is up to date"),
+                        crate::update::Outcome::Failed(e) if manual => self.show_toast(&format!("Could not update: {e}")),
+                        _ => {}
+                    }
+                }
                 TaskMsg::Sent { mode, done, missing, failed } => {
                     self.busy = false;
                     self.update_settings(|st| {
@@ -1228,7 +1293,7 @@ impl App {
         if self.popover.is_some() || self.edit.is_some() {
             return;
         }
-        if self.sidebar_open() && x >= self.width() - SIDEBAR_W && y >= self.header_h() {
+        if self.sidebar_open() && x >= self.width() - SIDEBAR_W && y >= self.content_top() {
             self.props_scroll = (self.props_scroll - delta / 2.0).clamp(0.0, view::sidebar_max_scroll(self));
             self.dirty = true;
             return;
@@ -1335,6 +1400,17 @@ impl App {
                 return vec![Effect::Install];
             }
             Action::DefaultApps => return vec![Effect::DefaultApps],
+            Action::CheckUpdates => self.check_for_updates(true),
+            Action::ToggleAutoUpdate => {
+                let on = self.update_settings(|st| {
+                    st.auto_update = !st.auto_update;
+                    st.auto_update
+                });
+                self.show_toast(if on { "Automatic updates on" } else { "Automatic updates off" });
+            }
+            Action::Restart => return vec![Effect::Restart(self.current().map(Path::to_path_buf))],
+            Action::OpenProfile => return vec![Effect::OpenUrl(crate::release::profile_url())],
+            Action::OpenProject => return vec![Effect::OpenUrl(crate::release::project_url())],
             Action::SendCopy => self.send(SendMode::Copy),
             Action::SendMove => self.send(SendMode::Move),
         }

@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Rust
+        run: rustup update stable --no-self-update && rustup component add clippy
+      - name: Clippy
+        run: cargo clippy --release --locked -- -D warnings
+      - name: Test
+        run: cargo test --release --locked

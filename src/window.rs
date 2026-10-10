@@ -17,7 +17,7 @@ use windows::core::{BOOL, HSTRING, PCWSTR, Result, w};
 
 use crate::app::{App, Cursor, Effect, Key, NcHit, WM_TASK};
 use crate::settings::Placement;
-use crate::{install, instance, sys};
+use crate::{install, instance, sys, update};
 
 /// `None`: not installed; `Some(true)`: this is the installed copy.
 fn install_state() -> Option<bool> {
@@ -133,6 +133,8 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
         let fx = host_ref.with(|a| a.open_launch(args)).unwrap_or_default();
         host_ref.run_effects(hwnd, fx);
         instance::set_target(hwnd);
+        update::clean_up();
+        host_ref.with(App::maybe_check_for_updates);
         let _ = UpdateWindow(hwnd);
         set_attr(hwnd, DWMWA_CLOAK, &BOOL(0));
 
@@ -291,6 +293,24 @@ impl Host {
                         }
                     }
                     Effect::DefaultApps => install::open_default_apps(),
+                    Effect::OpenUrl(url) => {
+                        sys::shell_open(&url);
+                    }
+                    Effect::Restart(file) => {
+                        let started = std::env::current_exe().and_then(|exe| {
+                            let mut cmd = std::process::Command::new(exe);
+                            cmd.args(file);
+                            cmd.spawn()
+                        });
+                        match started {
+                            Ok(_) => {
+                                let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                            }
+                            Err(e) => {
+                                self.with(|a| a.show_toast(&format!("Could not restart: {e}")));
+                            }
+                        }
+                    }
                 }
             }
         }

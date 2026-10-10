@@ -52,6 +52,11 @@ pub enum Action {
     Install,
     ConfirmInstall,
     DefaultApps,
+    CheckUpdates,
+    ToggleAutoUpdate,
+    Restart,
+    OpenProfile,
+    OpenProject,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

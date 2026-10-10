@@ -5,7 +5,7 @@
 use std::f32::consts::TAU;
 use std::path::Path;
 
-use crate::app::{App, Dialog, HEADER_H, Popover, SIDEBAR_W, TOOLBAR_H};
+use crate::app::{App, BANNER_H, Dialog, HEADER_H, Popover, SIDEBAR_W, TOOLBAR_H};
 use crate::edit::{Aspect, Handle};
 use crate::geom::{Affine, Rect};
 use crate::icons::Icon;
@@ -46,6 +46,9 @@ pub fn build(app: &App) -> Ui<'_> {
     }
     if app.edit.is_some() {
         toolbar(app, &mut ui, &mut anchors);
+    }
+    if app.banner_visible() {
+        banner(app, &mut ui);
     }
     if app.header_visible() {
         header(app, &mut ui, &mut anchors);
@@ -203,6 +206,23 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         }
         None => ui.text(area, title, TextStyle::Heading, fg, Align::Centre),
     }
+}
+
+/// An `AdwBanner` announcing an installed update.
+fn banner(app: &App, ui: &mut Ui) {
+    let crate::app::UpdateState::Ready(v) = &app.update else { return };
+    let t = ui.t;
+    let r = Rect::new(0.0, app.header_h(), app.width(), BANNER_H);
+    ui.fill(r, 0.0, t.view_bg);
+    ui.fill(r, 0.0, t.accent_bg.alpha(0.3));
+    ui.hline(0.0, r.w, r.bottom() - 1.0, t.headerbar_shade);
+    ui.widget(r, Action::None, None);
+    let label = "Restart";
+    let bw = ui.text_width(label, TextStyle::Heading) + 34.0;
+    let b = Rect::new(r.right() - 12.0 - bw, r.y + (BANNER_H - BTN) / 2.0, bw, BTN);
+    ui.button(b, Action::Restart, Content::Label(label), Style::Suggested, t.window_fg, true, false, None);
+    let text = format!("Het Plantsoen {v} has been installed");
+    ui.text(Rect::new(12.0 + bw, r.y, (r.w - 2.0 * (bw + 24.0)).max(0.0), BANNER_H), text, TextStyle::Body, t.window_fg, Align::Centre);
 }
 
 // ------------------------------------------------------------------------
@@ -467,7 +487,7 @@ fn groups_height(groups: &[Group]) -> f32 {
 }
 
 pub fn sidebar_max_scroll(app: &App) -> f32 {
-    let visible = app.height() - app.header_h();
+    let visible = app.height() - app.content_top();
     (groups_height(&properties(app)) - visible).max(0.0)
 }
 
@@ -481,7 +501,7 @@ fn boxed_list(ui: &mut Ui, r: Rect) {
 
 fn sidebar(app: &App, ui: &mut Ui) {
     let t = ui.t;
-    let top = app.header_h();
+    let top = app.content_top();
     let area = Rect::new(app.width() - SIDEBAR_W, top, SIDEBAR_W, app.height() - top);
     ui.fill(area, 0.0, t.sidebar_bg);
     ui.vline(area.x - 1.0, top, area.bottom(), t.headerbar_shade);
@@ -586,6 +606,21 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
             if app.installed.is_some() {
                 v.push(entry(Action::DefaultApps, "Default Apps…", None));
             }
+            v.push(Item::Separator);
+            v.push(Item::Entry {
+                action: Action::CheckUpdates,
+                label: "Check for Updates…".into(),
+                accel: None,
+                check: None,
+                enabled: !matches!(app.update, crate::app::UpdateState::Checking { .. }),
+            });
+            v.push(Item::Entry {
+                action: Action::ToggleAutoUpdate,
+                label: "Automatic Updates".into(),
+                accel: None,
+                check: Some(app.settings.auto_update),
+                enabled: true,
+            });
             v.push(Item::Separator);
             v.push(entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")));
             v.push(entry(Action::About, "About Het Plantsoen", None));
@@ -801,7 +836,7 @@ fn dialog_size(app: &App, d: Dialog) -> (f32, f32) {
             (w, 32.0 + hh + 10.0 + bh + 24.0 + 40.0 + 24.0)
         }
         Dialog::Shortcuts => (480.0, SHORTCUTS.iter().map(|(_, rows)| 30.0 + rows.len() as f32 * 40.0 + 18.0).sum::<f32>() + 6.0),
-        Dialog::About => (360.0, 272.0),
+        Dialog::About => (360.0, 360.0),
         Dialog::ManageMarks => {
             let w = 520.0f32.min(app.width() - 24.0);
             let (_, ph) = m.measure(MARKS_INTRO, TextStyle::Body, w - 48.0, true);
@@ -877,10 +912,23 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             ui.icon(Icon::Image, icon.centred(56.0, 56.0), t.accent_fg);
             y += 96.0 + 18.0;
             ui.text(Rect::new(r.x, y, r.w, 36.0), "Het Plantsoen", TextStyle::Title1, fg, Align::Centre);
-            y += 40.0;
-            ui.text(Rect::new(r.x, y, r.w, 20.0), concat!("Version ", env!("CARGO_PKG_VERSION")), TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Centre);
-            y += 32.0;
-            ui.paragraph(r.x + 24.0, y, r.w - 48.0, "A lean, fast photo viewer.\nBuilt in Rust on Direct2D and the Windows Imaging Component.", TextStyle::Body, fg, Align::Centre);
+            y += 38.0;
+            // The developer's name links to their profile, as in AdwAboutDialog.
+            let dev = crate::release::OWNER;
+            let dw = ui.text_width(dev, TextStyle::Body) + 24.0;
+            ui.button(Rect::new(r.cx() - dw / 2.0, y, dw, 30.0), Action::OpenProfile, Content::Label(dev), Style::Flat, t.accent, true, false, Some("GitHub Profile"));
+            y += 34.0;
+            let ver = concat!("Version ", env!("CARGO_PKG_VERSION"));
+            let vw = ui.text_width(ver, TextStyle::Caption) + 20.0;
+            let vr = Rect::new(r.cx() - vw / 2.0, y, vw, 24.0);
+            ui.fill(vr, 12.0, t.accent.alpha(0.1));
+            ui.text(vr, ver, TextStyle::Caption, t.accent, Align::Centre);
+            y += 38.0;
+            y += ui.paragraph(r.x + 24.0, y, r.w - 48.0, "A lean, fast photo viewer.\nBuilt in Rust on Direct2D and the Windows Imaging Component.", TextStyle::Body, fg, Align::Centre);
+            y += 18.0;
+            let label = "Project Page";
+            let pw = ui.text_width(label, TextStyle::Body) + 34.0;
+            ui.button(Rect::new(r.cx() - pw / 2.0, y, pw, BTN), Action::OpenProject, Content::Label(label), Style::Normal, fg, true, false, Some(&crate::release::project_url()));
         }
         Dialog::ManageMarks => {
             let f = dialog_frame(app, ui, width, content_h, Some("Manage Marks"), false);

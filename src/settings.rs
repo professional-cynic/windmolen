@@ -22,7 +22,7 @@ pub struct Placement {
     pub maximised: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// Destination folder of each mark slot.
     pub mark_dirs: [Option<PathBuf>; SLOTS],
@@ -30,6 +30,23 @@ pub struct Settings {
     marks: BTreeMap<PathBuf, BTreeMap<OsString, u16>>,
     pub placement: Option<Placement>,
     pub properties: bool,
+    /// Check GitHub for new releases at most once a day.
+    pub auto_update: bool,
+    /// Unix time of the last update check.
+    pub last_update_check: u64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            mark_dirs: Default::default(),
+            marks: BTreeMap::new(),
+            placement: None,
+            properties: false,
+            auto_update: true,
+            last_update_check: 0,
+        }
+    }
 }
 
 const ALL_SLOTS: u16 = (1 << SLOTS) - 1;
@@ -97,6 +114,7 @@ impl Settings {
             s += &format!("window\t{}\t{}\t{}\t{}\t{}\n", p.x, p.y, p.w, p.h, u8::from(p.maximised));
         }
         s += &format!("properties\t{}\n", u8::from(self.properties));
+        s += &format!("updates\t{}\t{}\n", u8::from(self.auto_update), self.last_update_check);
         s
     }
 
@@ -128,6 +146,10 @@ impl Settings {
                     }
                 }
                 ["properties", v] => st.properties = *v == "1",
+                ["updates", on, last] => {
+                    st.auto_update = *on != "0";
+                    st.last_update_check = last.parse().unwrap_or(0);
+                }
                 _ => {}
             }
         }
@@ -181,6 +203,8 @@ mod tests {
         s.toggle(Path::new(r"C:\Other"), OsStr::new("b.png"), 2);
         s.placement = Some(Placement { x: -5, y: 10, w: 800, h: 600, maximised: true });
         s.properties = true;
+        s.auto_update = false;
+        s.last_update_check = 1_790_000_000;
         let t = Settings::parse(&s.serialise());
         assert_eq!(t, s);
         assert_eq!(t.counts(), [1, 0, 1, 0, 0, 0, 0, 0, 1]);
