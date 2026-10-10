@@ -28,6 +28,7 @@ pub enum Icon {
     Remove,
     Image,
     ImageMissing,
+    Windmill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -78,6 +79,11 @@ impl Icon {
                 (FRAME, Stroke(1.5)),
                 ("M2.5 12L6 8L9 11L11 9L13.5 11.5", Stroke(1.5)),
                 ("M11.5 5.5A1.5 1.5 0 1 1 8.5 5.5A1.5 1.5 0 1 1 11.5 5.5Z", Fill),
+            ],
+            Self::Windmill => &[
+                ("M6.25 15L7.25 8.5H8.75L9.75 15Z", Fill),
+                ("M3 2L13 12M13 2L3 12", Stroke(1.25)),
+                ("M3.5 2.5L6.25 5.25M12.5 2.5L9.75 5.25M3.5 11.5L6.25 8.75M12.5 11.5L9.75 8.75", Stroke(3.0)),
             ],
             Self::ImageMissing => &[(FRAME, Stroke(1.5)), ("M5.5 5.5L10.5 10.5M10.5 5.5L5.5 10.5", Stroke(1.5))],
         }
@@ -303,6 +309,7 @@ mod tests {
             Icon::Remove,
             Icon::Image,
             Icon::ImageMissing,
+            Icon::Windmill,
         ];
         for icon in all {
             for (d, _) in icon.parts() {

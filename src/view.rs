@@ -909,7 +909,7 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             let mut y = r.y;
             let icon = Rect::new(r.cx() - 48.0, y, 96.0, 96.0);
             ui.fill(icon, 24.0, t.accent_bg);
-            ui.icon(Icon::Image, icon.centred(56.0, 56.0), t.accent_fg);
+            ui.icon(Icon::Windmill, icon.centred(64.0, 64.0), t.accent_fg);
             y += 96.0 + 18.0;
             ui.text(Rect::new(r.x, y, r.w, 36.0), "Windmolen", TextStyle::Title1, fg, Align::Centre);
             y += 38.0;
