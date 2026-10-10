@@ -115,11 +115,11 @@ pub fn installed_exe() -> Option<PathBuf> {
     read_string(APP_KEY, "InstallPath").map(PathBuf::from).filter(|p| p.is_file())
 }
 
-/// Whether this process is the installed copy.
-pub fn running_installed() -> bool {
-    let (Some(a), Ok(b)) = (installed_exe(), std::env::current_exe()) else { return false };
-    let norm = |p: &Path| std::fs::canonicalize(p).map(|c| c.to_string_lossy().to_lowercase()).unwrap_or_default();
-    norm(&a) == norm(&b)
+/// `None` when not installed, else whether this process is the installed copy.
+pub fn state() -> Option<bool> {
+    let installed = std::fs::canonicalize(installed_exe()?).ok();
+    let running = std::env::current_exe().and_then(std::fs::canonicalize).ok();
+    Some(installed.is_some() && installed == running)
 }
 
 fn install_dir() -> Result<PathBuf, String> {

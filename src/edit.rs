@@ -339,6 +339,35 @@ mod tests {
         }
     }
 
+    /// `IWICBitmapFlipRotator` as Wine implements it (verified against
+    /// Windows): the source pixel shown at destination pixel (x, y) for
+    /// `WICBitmapTransformRotate(rot * 90) | FlipHorizontal(flip)`.
+    fn wic_source_pixel(rot: u8, flip: bool, (w, h): (u32, u32), (x, y): (u32, u32)) -> (u32, u32) {
+        let (swap, mut flip_x, mut flip_y) = [(false, false, false), (true, true, false), (false, true, true), (true, false, true)][usize::from(rot)];
+        if flip {
+            if swap { flip_y = !flip_y } else { flip_x = !flip_x }
+        }
+        let (dw, dh) = if swap { (h, w) } else { (w, h) };
+        let sx = if flip_x { dw - 1 - x } else { x };
+        let sy = if flip_y { dh - 1 - y } else { y };
+        if swap { (sy, sx) } else { (sx, sy) }
+    }
+
+    #[test]
+    fn wic_flip_rotator() {
+        // Saving passes `rot` and `flip` to WIC unchanged, so WIC must place
+        // every pixel where `Orient` (and the preview) does.
+        let (w, h) = (4u32, 3u32);
+        for o in all() {
+            let (dw, dh) = o.apply_size(w, h);
+            for (sx, sy) in (0..h).flat_map(|y| (0..w).map(move |x| (x, y))) {
+                let (u, v) = o.map_unit((sx as f32 + 0.5) / w as f32, (sy as f32 + 0.5) / h as f32);
+                let (dx, dy) = ((u * dw as f32 - 0.5).round() as u32, (v * dh as f32 - 0.5).round() as u32);
+                assert_eq!(wic_source_pixel(o.rot, o.flip, (w, h), (dx, dy)), (sx, sy), "{o:?}");
+            }
+        }
+    }
+
     #[test]
     fn crop_drag_stays_inside() {
         let start = Rect::new(10.0, 10.0, 50.0, 50.0);

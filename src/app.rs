@@ -5,18 +5,19 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::ID2D1Bitmap;
 use windows::Win32::Graphics::Imaging::{GUID_ContainerFormatAdng, GUID_ContainerFormatHeif, GUID_ContainerFormatJpeg, GUID_ContainerFormatPng};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
+use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 use crate::edit::{self, Aspect, Handle, Orient};
 use crate::geom::Rect;
 use crate::render::{Frame, Renderer};
 use crate::settings::{SLOTS, Settings};
+use crate::sys::Poster;
 use crate::theme::{self, Color, Theme};
 use crate::ui::{Action, Widget};
 use crate::wic::{self, Decoder, Job, Meta, Outcome, Wic};
@@ -33,6 +34,7 @@ const MAX_ZOOM: f32 = 32.0;
 const ANIM: Duration = Duration::from_millis(180);
 const OSD_IDLE: Duration = Duration::from_secs(2);
 const TOAST_TIME: Duration = Duration::from_secs(3);
+const TOAST_FADE: Duration = Duration::from_millis(200);
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\Windmolen.Settings");
 
@@ -101,6 +103,10 @@ pub struct View {
     pub cy: f32,
 }
 
+impl View {
+    const FIT: Self = Self { fit: true, s: 1.0, cx: 0.0, cy: 0.0 };
+}
+
 pub struct EditState {
     pub orient: Orient,
     pub crop: Rect,
@@ -139,13 +145,12 @@ pub enum SendMode {
 }
 
 pub struct App {
-    pub hwnd: HWND,
     pub r: Renderer,
     pub exts: Vec<String>,
     ext_set: HashSet<String>,
     decoder: Decoder,
     decoded: Receiver<Outcome>,
-    task_tx: Sender<TaskMsg>,
+    tasks: Poster<TaskMsg>,
     task_rx: Receiver<TaskMsg>,
     pub busy: bool,
     /// Whether an installed copy exists, and whether this is it.
@@ -213,13 +218,12 @@ impl App {
         let settings = settings_path.as_deref().map(Settings::load).unwrap_or_default();
         let now = Instant::now();
         Ok(Self {
-            hwnd,
             r,
             exts,
             ext_set,
-            decoder: Decoder::new(hwnd, tx),
+            decoder: Decoder::new(Poster::new(tx, hwnd, wic::WM_DECODED)),
             decoded,
-            task_tx,
+            tasks: Poster::new(task_tx, hwnd, WM_TASK),
             task_rx,
             busy: false,
             installed: None,
@@ -240,7 +244,7 @@ impl App {
             index: 0,
             cache: HashMap::new(),
             loading_since: None,
-            view: View { fit: true, s: 1.0, cx: 0.0, cy: 0.0 },
+            view: View::FIT,
             anim: None,
             edit: None,
             popover: None,
@@ -439,10 +443,10 @@ impl App {
         self.add_launch(paths)
     }
 
-    /// More files from the same Explorer action (see `instance`).
+    /// More files from the same Explorer action (see `instance`). Paths
+    /// are absolute: the processes that send them have their own directory.
     pub fn add_launch(&mut self, paths: Vec<PathBuf>) -> Vec<Effect> {
         for p in paths {
-            let p = std::path::absolute(&p).unwrap_or(p);
             if !self.launch.contains(&p) {
                 self.launch.push(p);
             }
@@ -467,17 +471,18 @@ impl App {
         if files.is_empty() {
             return Vec::new();
         }
-        let cur = self.current().map(Path::to_path_buf);
-        let index = cur.and_then(|c| files.iter().position(|p| *p == c)).unwrap_or(0);
+        let index = self.current().and_then(|c| files.iter().position(|p| p == c)).unwrap_or(0);
         self.folder = None;
         self.selection = true;
-        self.files = files;
-        self.index = usize::MAX;
-        self.go(index)
+        self.browse(files, index)
     }
 
     /// Opens a file (browsing its folder) or the first image in a folder.
     pub fn open_path(&mut self, path: &Path) -> Vec<Effect> {
+        if self.edit.is_some() {
+            self.show_toast("Save or cancel the edit first");
+            return Vec::new();
+        }
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let (dir, file) = if path.is_dir() { (path.clone(), None) } else { (path.parent().map(Path::to_path_buf).unwrap_or_default(), Some(path.clone())) };
         let mut files = self.scan(&dir);
@@ -499,55 +504,62 @@ impl App {
         }
         self.folder = Some(dir);
         self.selection = false;
-        self.files = files;
+        // An explicit open reads the files afresh.
         self.cache.clear();
-        self.index = usize::MAX;
-        self.go(index)
+        self.browse(files, index)
     }
 
-    /// Re-reads the folder, keeping the current file when it still exists.
+    /// Re-reads the folder (or selection), keeping the current file when it
+    /// still exists.
     fn rescan(&mut self) -> Vec<Effect> {
-        let cur = self.current().map(Path::to_path_buf);
-        if self.selection {
-            self.files.retain(|p| p.is_file());
-        } else if let Some(dir) = self.folder.clone() {
-            self.files = self.scan(&dir);
+        let files = if self.selection {
+            self.files.iter().filter(|p| p.is_file()).cloned().collect()
+        } else if let Some(dir) = &self.folder {
+            self.scan(dir)
         } else {
             return Vec::new();
-        }
-        if self.files.is_empty() {
-            self.cache.clear();
-            self.index = 0;
-            self.dirty = true;
-            return vec![Effect::Title("Windmolen".into())];
-        }
-        let i = cur.and_then(|c| self.files.iter().position(|p| *p == c)).unwrap_or(self.index.min(self.files.len() - 1));
-        self.index = usize::MAX;
-        self.go(i)
+        };
+        let i = self.current().and_then(|c| files.iter().position(|p| p == c)).unwrap_or(self.index);
+        self.browse(files, i)
     }
 
-    pub fn go(&mut self, i: usize) -> Vec<Effect> {
-        if self.files.is_empty() || self.edit.is_some() {
-            return Vec::new();
-        }
-        let i = i.min(self.files.len() - 1);
-        let changed = i != self.index;
-        self.index = i;
-        if changed {
-            self.view = View { fit: true, s: 1.0, cx: 0.0, cy: 0.0 };
+    /// Replaces the file list and shows `files[i]`.
+    fn browse(&mut self, files: Vec<PathBuf>, i: usize) -> Vec<Effect> {
+        let shown = self.current().map(Path::to_path_buf);
+        self.files = files;
+        self.show(i, shown)
+    }
+
+    fn go(&mut self, i: usize) -> Vec<Effect> {
+        let shown = self.current().map(Path::to_path_buf);
+        self.show(i, shown)
+    }
+
+    /// Makes `files[i]` current. Another image than `shown` starts with a
+    /// fresh view and ends any edit, which belonged to the old one.
+    fn show(&mut self, i: usize, shown: Option<PathBuf>) -> Vec<Effect> {
+        self.index = i.min(self.files.len().saturating_sub(1));
+        if self.current() != shown.as_deref() {
+            self.view = View::FIT;
             self.anim = None;
             self.props_scroll = 0.0;
+            self.edit = None;
+            self.crop_drag = None;
         }
         self.loading_since = Some(Instant::now());
         self.request_decodes();
         self.dirty = true;
-        let name = self.current().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        vec![Effect::Title(format!("{name} – Windmolen"))]
+        let title = match self.current().and_then(Path::file_name) {
+            Some(name) => format!("{} – Windmolen", name.to_string_lossy()),
+            None => "Windmolen".into(),
+        };
+        vec![Effect::Title(title)]
     }
 
+    /// Next or previous image; not while editing.
     fn step(&mut self, d: isize) -> Vec<Effect> {
         let n = self.files.len() as isize;
-        if n < 2 {
+        if n < 2 || self.edit.is_some() {
             return Vec::new();
         }
         self.go((self.index as isize + d).rem_euclid(n) as usize)
@@ -569,6 +581,8 @@ impl App {
     }
 
     fn request_decodes(&mut self) {
+        // Collect finished work first, so none of it is requested again.
+        self.on_decoded();
         let wanted = self.wanted();
         self.cache.retain(|k, _| wanted.contains(k));
         let max_edge = self.r.max_bitmap(self.size.0, self.size.1);
@@ -677,6 +691,8 @@ impl App {
         }
         self.edit = Some(EditState { orient, crop: edit::FULL, aspect: Aspect::Free });
         self.popover = None;
+        // Focus targets of the viewer are gone in the editor.
+        self.focus = None;
         self.dirty = true;
     }
 
@@ -723,12 +739,12 @@ impl App {
         let orient = l.meta.orient.then(e.orient);
         let (ow, oh) = orient.apply_size(l.meta.width, l.meta.height);
         let crop = edit::crop_pixels(e.crop, ow, oh);
-        let (container, ext) = if l.meta.can_encode {
-            (l.meta.container, src.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default())
+        let (container, ext): (_, OsString) = if l.meta.can_encode {
+            (l.meta.container, src.extension().unwrap_or_default().into())
         } else if [GUID_ContainerFormatHeif, GUID_ContainerFormatAdng].contains(&l.meta.container) {
-            (GUID_ContainerFormatJpeg, "jpg".to_owned())
+            (GUID_ContainerFormatJpeg, "jpg".into())
         } else {
-            (GUID_ContainerFormatPng, "png".to_owned())
+            (GUID_ContainerFormatPng, "png".into())
         };
         if replace && container != l.meta.container {
             return;
@@ -753,7 +769,7 @@ impl App {
             if result.is_err() {
                 let _ = std::fs::remove_file(&tmp);
             }
-            let _ = tx.send(TaskMsg::Saved { result, replaced: replace });
+            tx.send(TaskMsg::Saved { result, replaced: replace });
         });
     }
 
@@ -837,10 +853,11 @@ impl App {
         self.busy = true;
         self.show_sticky(if mode == SendMode::Copy { "Copying…" } else { "Moving…" });
         self.spawn(move |tx| {
+            let verb = if mode == SendMode::Copy { "Copying" } else { "Moving" };
             let (mut done, mut missing, mut failed) = (Vec::new(), Vec::new(), Vec::new());
             let total = items.len();
             for (i, (folder, name, bits)) in items.into_iter().enumerate() {
-                let _ = tx.send(TaskMsg::Progress(format!("{} {} of {total}…", if mode == SendMode::Copy { "Copying" } else { "Moving" }, i + 1)));
+                tx.send(TaskMsg::Progress(format!("{verb} {} of {total}…", i + 1)));
                 let src = folder.join(&name);
                 if !src.is_file() {
                     missing.push((folder, name));
@@ -851,20 +868,21 @@ impl App {
                 if targets.is_empty() {
                     continue;
                 }
+                // Only a folder that resolves can be recognised as the file's own.
+                let home = std::fs::canonicalize(&folder).ok();
                 let mut sent = 0u16;
                 let mut ok = true;
                 for (k, &(slot, dest)) in targets.iter().enumerate() {
                     let last = k + 1 == targets.len();
-                    let same = std::fs::canonicalize(dest).ok() == std::fs::canonicalize(&folder).ok();
-                    let r = if let Err(e) = std::fs::create_dir_all(dest) {
-                        Err(e.to_string())
-                    } else if same {
-                        Ok(())
-                    } else if mode == SendMode::Move && last && ok {
-                        sys::move_into(&src, dest).map(drop)
-                    } else {
-                        sys::copy_into(&src, dest).map(drop)
-                    };
+                    let r = std::fs::create_dir_all(dest).map_err(|e| e.to_string()).and_then(|()| {
+                        if home.is_some() && std::fs::canonicalize(dest).ok() == home {
+                            Ok(()) // Already in that folder.
+                        } else if mode == SendMode::Move && last && ok {
+                            sys::move_into(&src, dest).map(drop)
+                        } else {
+                            sys::copy_into(&src, dest).map(drop)
+                        }
+                    });
                     match r {
                         Ok(()) => sent |= 1 << slot,
                         Err(e) => {
@@ -877,7 +895,7 @@ impl App {
                     done.push((folder, name, sent));
                 }
             }
-            let _ = tx.send(TaskMsg::Sent { mode, done, missing, failed });
+            tx.send(TaskMsg::Sent { mode, done, missing, failed });
         });
     }
 
@@ -897,7 +915,7 @@ impl App {
         self.update_settings(|st| st.last_update_check = now);
         self.spawn(move |tx| {
             let outcome = crate::update::run();
-            let _ = tx.send(TaskMsg::Update { outcome, manual });
+            tx.send(TaskMsg::Update { outcome, manual });
         });
     }
 
@@ -909,25 +927,10 @@ impl App {
         }
     }
 
-    fn spawn(&self, f: impl FnOnce(Sender<TaskMsg>) + Send + 'static) {
-        let tx = self.task_tx.clone();
-        let hwnd = self.hwnd.0 as isize;
-        std::thread::spawn(move || {
-            let (inner_tx, inner_rx) = channel::<TaskMsg>();
-            let forward = std::thread::spawn(move || {
-                for m in inner_rx {
-                    if tx.send(m).is_err() {
-                        break;
-                    }
-                    // SAFETY: posting to a possibly-dead window is harmless.
-                    unsafe {
-                        let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_TASK, WPARAM(0), LPARAM(0));
-                    }
-                }
-            });
-            f(inner_tx);
-            let _ = forward.join();
-        });
+    /// Runs `f` on a worker thread; its messages arrive in [`on_task`](Self::on_task).
+    fn spawn(&self, f: impl FnOnce(Poster<TaskMsg>) + Send + 'static) {
+        let tx = self.tasks.clone();
+        std::thread::spawn(move || f(tx));
     }
 
     pub fn on_task(&mut self) -> Vec<Effect> {
@@ -986,7 +989,6 @@ impl App {
                                 }
                             }
                             fx.extend(self.rescan());
-                            self.request_decodes();
                         }
                         Err(e) => self.show_toast(&format!("Could not save: {e}")),
                     }
@@ -1041,7 +1043,7 @@ impl App {
             return 1.0;
         }
         let fade_in = (age / 0.15).min(1.0);
-        let fade_out = if t.sticky { 1.0 } else { ((TOAST_TIME.as_secs_f32() - age) / 0.2).clamp(0.0, 1.0) };
+        let fade_out = if t.sticky { 1.0 } else { ((TOAST_TIME.as_secs_f32() - age) / TOAST_FADE.as_secs_f32()).clamp(0.0, 1.0) };
         fade_in.min(fade_out)
     }
 
@@ -1075,6 +1077,7 @@ impl App {
     /// Advances animations; called on every timer tick and before painting.
     pub fn tick(&mut self) {
         let prev = self.now;
+        let toast = self.toast_alpha();
         self.now = Instant::now();
         let dt = (self.now - prev).as_secs_f32();
 
@@ -1094,10 +1097,11 @@ impl App {
             };
             self.dirty = true;
         }
-        if let Some(t) = &self.toast {
-            if !t.sticky && self.now - t.born >= TOAST_TIME {
-                self.toast = None;
-            }
+        if self.toast.as_ref().is_some_and(|t| !t.sticky && self.now - t.born >= TOAST_TIME) {
+            self.toast = None;
+        }
+        // A toast needs painting only while it fades, or when it vanishes.
+        if self.toast_alpha() != toast {
             self.dirty = true;
         }
         if self.show_spinner() {
@@ -1117,11 +1121,15 @@ impl App {
         }
         let mut wake: Vec<Duration> = Vec::new();
         let left = |deadline: Instant| deadline.saturating_duration_since(self.now);
-        if let Some(t) = &self.toast {
-            wake.push(left(t.born + TOAST_TIME - Duration::from_millis(200)));
+        // Sticky toasts stay until replaced; others fade out (or vanish).
+        if let Some(t) = self.toast.as_ref().filter(|t| !t.sticky) {
+            let fade = if self.animations { TOAST_FADE } else { Duration::ZERO };
+            wake.push(left(t.born + TOAST_TIME - fade));
         }
-        if self.osd > 0.0 {
-            wake.push(left(self.last_motion + OSD_IDLE));
+        // Past the deadline, only input can hide the OSD (it is hovered).
+        let idle = self.last_motion + OSD_IDLE;
+        if self.osd > 0.0 && self.now < idle {
+            wake.push(left(idle));
         }
         if self.hover.is_some() && self.now - self.hover_since < TOOLTIP_DELAY {
             wake.push(left(self.hover_since + TOOLTIP_DELAY));
@@ -1509,9 +1517,8 @@ impl App {
             Key::F9 => self.activate(Action::Properties),
             Key::F10 => self.activate(Action::MainMenu),
             Key::F11 => self.activate(Action::Fullscreen),
-            Key::Delete => return None,
             Key::Letter(c) if ctrl => match (c, shift) {
-                ('o', _) => self.activate(Action::Open),
+                ('o', _) if self.edit.is_none() => self.activate(Action::Open),
                 ('s', _) if self.edit.is_some() => self.activate(Action::EditSave),
                 ('r', false) => self.rotate_shortcut(true),
                 ('r', true) => self.rotate_shortcut(false),
@@ -1629,7 +1636,6 @@ pub enum Key {
     PageDown,
     Home,
     End,
-    Delete,
     F9,
     F10,
     F11,

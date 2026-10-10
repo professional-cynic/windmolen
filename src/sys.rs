@@ -2,13 +2,15 @@
 //! shell dialogs, theme settings, locale formatting and file operations.
 
 use std::cmp::Ordering;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HANDLE, HWND, SYSTEMTIME, WAIT_ABANDONED, WAIT_OBJECT_0,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HANDLE, HWND, LPARAM, SYSTEMTIME, WAIT_ABANDONED,
+    WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::Globalization::{DATE_SHORTDATE, GetDateFormatEx, GetTimeFormatEx, TIME_NOSECONDS};
@@ -20,8 +22,43 @@ use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegG
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
-use windows::Win32::UI::WindowsAndMessaging::{SPI_GETCLIENTAREAANIMATION, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
+use windows::Win32::UI::WindowsAndMessaging::{
+    PostMessageW, SPI_GETCLIENTAREAANIMATION, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+};
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR, Result, w};
+
+/// Hands values from a worker thread to the UI thread and wakes it with
+/// `msg`, whose handler drains the receiver.
+pub struct Poster<T> {
+    tx: Sender<T>,
+    /// The window, as an integer so the poster can cross threads.
+    hwnd: isize,
+    msg: u32,
+}
+
+impl<T> Poster<T> {
+    pub fn new(tx: Sender<T>, hwnd: HWND, msg: u32) -> Self {
+        Self { tx, hwnd: hwnd.0 as isize, msg }
+    }
+
+    /// Returns false once the receiving side is gone.
+    pub fn send(&self, value: T) -> bool {
+        if self.tx.send(value).is_err() {
+            return false;
+        }
+        // SAFETY: posting to a window that no longer exists fails harmlessly.
+        unsafe {
+            let _ = PostMessageW(Some(HWND(self.hwnd as *mut _)), self.msg, WPARAM(0), LPARAM(0));
+        }
+        true
+    }
+}
+
+impl<T> Clone for Poster<T> {
+    fn clone(&self) -> Self {
+        Self { tx: self.tx.clone(), hwnd: self.hwnd, msg: self.msg }
+    }
+}
 
 /// Initialises COM for the current thread and uninitialises it on drop.
 pub struct ComGuard(bool);
@@ -253,25 +290,27 @@ fn exists_error(e: &windows::core::Error) -> bool {
     e.code() == ERROR_FILE_EXISTS.to_hresult() || e.code() == ERROR_ALREADY_EXISTS.to_hresult()
 }
 
-/// Candidate names: `name`, then `stem (2).ext`, `stem (3).ext`, …
-fn candidate(stem: &str, ext: &str, n: u32) -> String {
-    let dot = if ext.is_empty() { "" } else { "." };
-    if n == 1 { format!("{stem}{dot}{ext}") } else { format!("{stem} ({n}){dot}{ext}") }
-}
-
-fn split_name(name: &Path) -> (String, String) {
-    let stem = name.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = name.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    (stem, ext)
+/// Candidate names: `stem.ext`, then `stem (2).ext`, `stem (3).ext`, …
+/// Built from OS strings, so names that are not valid Unicode survive.
+fn candidate(stem: &OsStr, ext: Option<&OsStr>, n: u32) -> OsString {
+    let mut name = stem.to_os_string();
+    if n > 1 {
+        name.push(format!(" ({n})"));
+    }
+    if let Some(ext) = ext.filter(|e| !e.is_empty()) {
+        name.push(".");
+        name.push(ext);
+    }
+    name
 }
 
 /// Runs `op(target)` for successive free names in `dir` until it does not
 /// fail with "already exists". The operation itself refuses to overwrite,
 /// so there is no check-then-act race.
-fn with_free_name(dir: &Path, stem: &str, ext: &str, mut op: impl FnMut(&Path) -> Result<()>) -> std::result::Result<PathBuf, String> {
+fn with_free_name(dir: &Path, stem: &OsStr, ext: Option<&OsStr>, mut op: impl FnMut(&HSTRING) -> Result<()>) -> std::result::Result<PathBuf, String> {
     for n in 1..10_000 {
         let target = dir.join(candidate(stem, ext, n));
-        match op(&target) {
+        match op(&HSTRING::from(target.as_os_str())) {
             Ok(()) => return Ok(target),
             Err(e) if exists_error(&e) => continue,
             Err(e) => return Err(e.message()),
@@ -282,33 +321,32 @@ fn with_free_name(dir: &Path, stem: &str, ext: &str, mut op: impl FnMut(&Path) -
 
 /// Copies `src` into `dir`, choosing a free name.
 pub fn copy_into(src: &Path, dir: &Path) -> std::result::Result<PathBuf, String> {
-    let (stem, ext) = split_name(Path::new(src.file_name().unwrap_or_default()));
     let s = HSTRING::from(src.as_os_str());
-    with_free_name(dir, &stem, &ext, |t| {
+    with_free_name(dir, src.file_stem().unwrap_or_default(), src.extension(), |t| {
         // SAFETY: NUL-terminated paths; `true` refuses to overwrite.
-        unsafe { CopyFileW(&s, &HSTRING::from(t.as_os_str()), true) }
+        unsafe { CopyFileW(&s, t, true) }
     })
 }
 
 /// Moves `src` into `dir`, choosing a free name (copies across volumes).
 pub fn move_into(src: &Path, dir: &Path) -> std::result::Result<PathBuf, String> {
-    let (stem, ext) = split_name(Path::new(src.file_name().unwrap_or_default()));
     let s = HSTRING::from(src.as_os_str());
-    with_free_name(dir, &stem, &ext, |t| {
+    with_free_name(dir, src.file_stem().unwrap_or_default(), src.extension(), |t| {
         // SAFETY: NUL-terminated paths; without MOVEFILE_REPLACE_EXISTING
         // the call fails instead of overwriting.
-        unsafe { MoveFileExW(&s, &HSTRING::from(t.as_os_str()), MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH) }
+        unsafe { MoveFileExW(&s, t, MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH) }
     })
 }
 
-/// Renames `tmp` to "`stem` (edited).ext" next to `original`.
-pub fn publish_copy(tmp: &Path, original: &Path, ext: &str) -> std::result::Result<PathBuf, String> {
+/// Renames `tmp` to "`stem` (edited).`ext`" next to `original`.
+pub fn publish_copy(tmp: &Path, original: &Path, ext: &OsStr) -> std::result::Result<PathBuf, String> {
     let dir = original.parent().unwrap_or(Path::new("."));
-    let stem = format!("{} (edited)", split_name(original).0);
+    let mut stem = original.file_stem().unwrap_or_default().to_os_string();
+    stem.push(" (edited)");
     let s = HSTRING::from(tmp.as_os_str());
-    with_free_name(dir, &stem, ext, |t| {
+    with_free_name(dir, &stem, Some(ext), |t| {
         // SAFETY: as in `move_into`.
-        unsafe { MoveFileExW(&s, &HSTRING::from(t.as_os_str()), MOVEFILE_WRITE_THROUGH) }
+        unsafe { MoveFileExW(&s, t, MOVEFILE_WRITE_THROUGH) }
     })
 }
 
@@ -341,10 +379,14 @@ pub fn temp_beside(near: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     #[test]
     fn candidates() {
-        assert_eq!(super::candidate("a", "jpg", 1), "a.jpg");
-        assert_eq!(super::candidate("a", "jpg", 3), "a (3).jpg");
-        assert_eq!(super::candidate("a", "", 2), "a (2)");
+        let jpg = Some(OsStr::new("jpg"));
+        assert_eq!(super::candidate(OsStr::new("a"), jpg, 1), "a.jpg");
+        assert_eq!(super::candidate(OsStr::new("a"), jpg, 3), "a (3).jpg");
+        assert_eq!(super::candidate(OsStr::new("a"), None, 2), "a (2)");
+        assert_eq!(super::candidate(OsStr::new("a"), Some(OsStr::new("")), 1), "a");
     }
 }

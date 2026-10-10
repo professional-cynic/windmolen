@@ -11,7 +11,7 @@ popovers, dialogs, toasts). `prototype.html` is the original HTML prototype.
   rendering, and the Windows Imaging Component (WIC) for decoding and encoding.
 - **No admin rights:** the manifest declares `asInvoker`, and settings live in
   `%APPDATA%\Windmolen\settings.txt`. Nothing is written to HKLM or Program Files.
-- **Small:** a ~750 KB executable, about 6 000 lines of Rust including tests.
+- **Small:** a ~750 KB executable, about 7 000 lines of Rust including tests.
 
 ## Formats
 
@@ -140,9 +140,9 @@ cargo build --release
 - **MSVC toolchain** (needs Visual Studio Build Tools): the manifest is always embedded
   by the linker. The Explorer icon is added when `rc.exe` is found, i.e. from a Developer prompt.
 
-`cargo test` runs the platform-independent unit tests (orientation algebra,
-crop maths, colour maths, settings parser, path parser, metadata formatting)
-on any OS.
+`cargo test` runs the platform-independent unit tests (orientation algebra and
+its mapping onto WIC's flip-rotator, crop maths, colour maths, settings parser,
+path parser, metadata formatting) on any OS.
 
 ## Layout
 
@@ -172,5 +172,6 @@ on any OS.
 - Two separate opens less than about 1.5 s apart are treated as one selection.
 - Tested here through unit tests and under Wine (rendering, navigation, marks,
   send, crop and save, install/uninstall registration, multi-file grouping).
-  Explorer itself and the Settings default-apps page can't be exercised under Wine. Wine lacks WIC rotation and JPEG metadata, so those
-  paths, and the real DWM frame, still need a check on Windows.
+  Explorer itself and the Settings default-apps page can't be exercised under Wine. Wine 9 lacks WIC rotation
+  (newer Wine has it) and JPEG metadata, so those paths, and the real DWM frame, still need a check on Windows;
+  the order in which WIC flips and rotates is pinned by a unit test modelled on Wine's implementation.

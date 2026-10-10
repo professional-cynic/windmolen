@@ -17,13 +17,8 @@ use windows::core::{BOOL, HSTRING, PCWSTR, Result, w};
 
 use crate::app::{App, Cursor, Effect, Key, NcHit, WM_TASK};
 use crate::settings::Placement;
-use crate::{install, instance, sys, update};
-
-/// `None`: not installed; `Some(true)`: this is the installed copy.
-fn install_state() -> Option<bool> {
-    install::installed_exe().map(|_| install::running_installed())
-}
 use crate::wic::WM_DECODED;
+use crate::{install, instance, sys, update};
 
 const CLASS: PCWSTR = w!("Windmolen.Window");
 const TIMER: usize = 1;
@@ -129,14 +124,16 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
         let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         let host_ref = &*host;
         host_ref.sync_size(hwnd);
-        host_ref.with(|a| a.installed = install_state());
         let fx = host_ref.with(|a| a.open_launch(args)).unwrap_or_default();
         host_ref.run_effects(hwnd, fx);
-        instance::set_target(hwnd);
-        update::clean_up();
-        host_ref.with(App::maybe_check_for_updates);
         let _ = UpdateWindow(hwnd);
         set_attr(hwnd, DWMWA_CLOAK, &BOOL(0));
+
+        // Housekeeping the first frame need not wait for.
+        instance::set_target(hwnd);
+        host_ref.with(|a| a.installed = install::state());
+        update::clean_up();
+        host_ref.with(App::maybe_check_for_updates);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -282,7 +279,7 @@ impl Host {
                         let Some(exts) = self.with(|a| a.exts.clone()) else { continue };
                         let result = install::install(&exts);
                         self.with(|a| {
-                            a.installed = install_state();
+                            a.installed = install::state();
                             match &result {
                                 Ok(_) => a.show_toast("Installed — choose Windmolen as the default in Settings"),
                                 Err(e) => a.show_toast(&format!("Could not install: {e}")),
@@ -512,7 +509,6 @@ impl Host {
                         VK_NEXT => Some(Key::PageDown),
                         VK_HOME => Some(Key::Home),
                         VK_END => Some(Key::End),
-                        VK_DELETE => Some(Key::Delete),
                         VK_F9 => Some(Key::F9),
                         VK_F10 => Some(Key::F10),
                         VK_F11 => Some(Key::F11),

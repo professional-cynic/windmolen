@@ -74,7 +74,12 @@ fn main() {
         _ => {}
     }
 
-    let files: Vec<std::path::PathBuf> = args.into_iter().filter(|a| !a.as_os_str().to_string_lossy().starts_with("--")).collect();
+    // Absolute, because a gathering instance has its own working directory.
+    let files: Vec<std::path::PathBuf> = args
+        .into_iter()
+        .filter(|a| !a.as_os_str().as_encoded_bytes().starts_with(b"--"))
+        .map(|a| std::path::absolute(&a).unwrap_or(a))
+        .collect();
     if let instance::Launch::Forwarded = instance::start(&files) {
         return;
     }

@@ -48,11 +48,17 @@ fn system_ui_font() -> Option<HSTRING> {
     (len > 0).then(|| HSTRING::from_wide(&face[..len]))
 }
 
+/// Measured sizes by (text, style, maximum width bits, wrap).
+type SizeKey = (String, TextStyle, u32, bool);
+
 /// DirectWrite text formatting; device independent, so it also serves layout.
 pub struct Text {
     factory: IDWriteFactory,
     family: HSTRING,
     formats: RefCell<HashMap<TextStyle, (IDWriteTextFormat, IDWriteInlineObject)>>,
+    /// Hit testing lays the UI out on every mouse move; measuring the same
+    /// strings again would create a DirectWrite layout each time.
+    sizes: RefCell<HashMap<SizeKey, (f32, f32)>>,
 }
 
 impl Text {
@@ -74,7 +80,7 @@ impl Text {
                 unsafe { fonts.FindFamilyName(name, &mut index, &mut exists) }.is_ok() && exists.as_bool()
             })
             .unwrap_or_else(|| HSTRING::from("Segoe UI"));
-        Ok(Self { factory, family, formats: RefCell::default() })
+        Ok(Self { factory, family, formats: RefCell::default(), sizes: RefCell::default() })
     }
 
     fn format(&self, style: TextStyle) -> Result<(IDWriteTextFormat, IDWriteInlineObject)> {
@@ -127,13 +133,24 @@ impl Text {
 impl Measure for Text {
     fn measure(&self, s: &str, style: TextStyle, max_w: f32, wrap: bool) -> (f32, f32) {
         let max_w = if max_w.is_finite() { max_w } else { 1e6 };
+        let key = (s.to_owned(), style, max_w.to_bits(), wrap);
+        if let Some(&size) = self.sizes.borrow().get(&key) {
+            return size;
+        }
         let Ok(l) = self.layout(s, style, max_w, 1e6, Align::Start, wrap) else { return (0.0, 0.0) };
         let mut m = DWRITE_TEXT_METRICS::default();
         // SAFETY: out-pointer to a local.
         if unsafe { l.GetMetrics(&mut m) }.is_err() {
             return (0.0, 0.0);
         }
-        (m.widthIncludingTrailingWhitespace.ceil(), m.height.ceil())
+        let size = (m.widthIncludingTrailingWhitespace.ceil(), m.height.ceil());
+        let mut sizes = self.sizes.borrow_mut();
+        // File names change while browsing: keep the cache bounded.
+        if sizes.len() >= 1024 {
+            sizes.clear();
+        }
+        sizes.insert(key, size);
+        size
     }
 }
 

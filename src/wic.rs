@@ -5,24 +5,22 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-use std::time::SystemTime;
 
 use windows::Win32::Foundation::{
-    GENERIC_READ, GENERIC_WRITE, HWND, LPARAM, WINCODEC_ERR_BADHEADER, WINCODEC_ERR_BADIMAGE, WINCODEC_ERR_BADSTREAMDATA,
-    WINCODEC_ERR_COMPONENTNOTFOUND, WINCODEC_ERR_STREAMREAD, WINCODEC_ERR_UNKNOWNIMAGEFORMAT, WPARAM,
+    GENERIC_READ, GENERIC_WRITE, WINCODEC_ERR_BADHEADER, WINCODEC_ERR_BADIMAGE, WINCODEC_ERR_BADSTREAMDATA, WINCODEC_ERR_COMPONENTNOTFOUND,
+    WINCODEC_ERR_STREAMREAD, WINCODEC_ERR_UNKNOWNIMAGEFORMAT,
 };
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::StructuredStorage::{PROPBAG2, PROPVARIANT, PropVariantClear};
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Variant::*;
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 use windows::core::{GUID, HSTRING, IUnknown, Interface, PCWSTR, Result, w};
 
 use crate::edit::Orient;
 use crate::meta::{self, Value};
+use crate::sys::Poster;
 
 pub const WM_DECODED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
@@ -146,7 +144,8 @@ pub struct Meta {
     pub exif: Vec<(&'static str, String)>,
     pub can_encode: bool,
     pub file_size: u64,
-    pub modified: Option<SystemTime>,
+    /// Last modification, formatted for the user's locale.
+    pub modified: Option<String>,
 }
 
 pub struct Decoded {
@@ -312,7 +311,7 @@ fn read_meta(f: &IWICImagingFactory, dec: &IWICBitmapDecoder, frame: &IWICBitmap
             exif,
             can_encode,
             file_size: fs.as_ref().map_or(0, |m| m.len()),
-            modified: fs.and_then(|m| m.modified().ok()),
+            modified: fs.and_then(|m| m.modified().ok()).map(crate::sys::format_time).filter(|s| !s.is_empty()),
         })
     }
 }
@@ -391,6 +390,8 @@ pub type Outcome = (PathBuf, std::result::Result<Decoded, String>);
 #[derive(Default)]
 struct Queue {
     jobs: Vec<Job>,
+    /// The image being decoded right now.
+    busy: Option<PathBuf>,
     quit: bool,
 }
 
@@ -402,42 +403,43 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(hwnd: HWND, tx: Sender<Outcome>) -> Self {
+    pub fn new(out: Poster<Outcome>) -> Self {
         let shared = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
         let s = Arc::clone(&shared);
-        let hwnd = hwnd.0 as isize;
         let thread = std::thread::spawn(move || {
             let _com = crate::sys::ComGuard::mta();
             let Ok(wic) = Wic::new() else { return };
+            let (lock, cv) = &*s;
             loop {
                 let job = {
-                    let (lock, cv) = &*s;
                     let mut q = lock.lock().unwrap_or_else(|p| p.into_inner());
+                    q.busy = None;
                     while q.jobs.is_empty() && !q.quit {
                         q = cv.wait(q).unwrap_or_else(|p| p.into_inner());
                     }
                     if q.quit {
                         return;
                     }
-                    q.jobs.remove(0)
+                    let job = q.jobs.remove(0);
+                    q.busy = Some(job.path.clone());
+                    job
                 };
                 let result = decode(&wic.0, &job.path, job.max_edge);
-                if tx.send((job.path, result)).is_err() {
+                if !out.send((job.path, result)) {
                     return;
-                }
-                // SAFETY: posting to a window handle is safe even if it died.
-                unsafe {
-                    let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_DECODED, WPARAM(0), LPARAM(0));
                 }
             }
         });
         Self { shared, thread: Some(thread) }
     }
 
-    /// Replaces all pending jobs, first one first.
-    pub fn request(&self, jobs: Vec<Job>) {
+    /// Replaces all pending jobs, first one first. The image being decoded
+    /// right now is not queued again: its result is on the way.
+    pub fn request(&self, mut jobs: Vec<Job>) {
         let (lock, cv) = &*self.shared;
-        lock.lock().unwrap_or_else(|p| p.into_inner()).jobs = jobs;
+        let mut q = lock.lock().unwrap_or_else(|p| p.into_inner());
+        jobs.retain(|j| q.busy.as_ref() != Some(&j.path));
+        q.jobs = jobs;
         cv.notify_one();
     }
 }
@@ -520,10 +522,10 @@ fn retag(f: &IWICImagingFactory, job: &SaveJob) -> Result<()> {
     }
 }
 
-/// WIC applies rotation before flipping; [`Orient`] flips first.
+/// WIC flips before it rotates clockwise, as [`Orient`] does (see the
+/// `wic_flip_rotator` test in `edit.rs`), so the fields map one to one.
 fn transform_options(o: Orient) -> WICBitmapTransformOptions {
-    let rot = if o.flip { (4 - o.rot) % 4 } else { o.rot };
-    let r = [WICBitmapTransformRotate0, WICBitmapTransformRotate90, WICBitmapTransformRotate180, WICBitmapTransformRotate270][rot as usize];
+    let r = [WICBitmapTransformRotate0, WICBitmapTransformRotate90, WICBitmapTransformRotate180, WICBitmapTransformRotate270][usize::from(o.rot)];
     if o.flip { WICBitmapTransformOptions(r.0 | WICBitmapTransformFlipHorizontal.0) } else { r }
 }
 

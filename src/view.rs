@@ -11,7 +11,6 @@ use crate::geom::{Affine, Rect};
 use crate::icons::Icon;
 use crate::meta;
 use crate::settings::SLOTS;
-use crate::sys;
 use crate::theme::{ACCENTS, BORDER_OPACITY, Color, DIM_OPACITY};
 use crate::ui::{Action, Align, Cmd, Content, Style, TextStyle, Ui};
 
@@ -104,7 +103,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
     }
 
     let mut left = GAP;
-    let (title, subtitle) = if let Some(e) = &app.edit {
+    let (title, subtitle) = if app.edit.is_some() {
         let label = "Cancel";
         let bw = ui.text_width(label, TextStyle::Body) + 34.0;
         ui.button(Rect::new(left, y, bw, BTN), Action::EditCancel, Content::Label(label), Style::Normal, fg, true, false, None);
@@ -144,7 +143,6 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         ui.icon(Icon::PanDown, arrow.centred(16.0, 16.0), t.accent_fg.alpha(k));
         anchors.save = Some(arrow);
         right -= GAP;
-        let _ = e;
         ("Edit".to_owned(), None)
     } else {
         let open = Rect::new(left, y, BTN, BTN);
@@ -459,8 +457,8 @@ fn properties(app: &App) -> Vec<Group> {
     let format = if m.frames > 1 { format!("{} ({} frames)", m.format, m.frames) } else { m.format.clone() };
     file.push(("Format".into(), format));
     file.push(("Size".into(), meta::file_size(m.file_size)));
-    if let Some(t) = m.modified {
-        file.push(("Modified".into(), sys::format_time(t)));
+    if let Some(t) = &m.modified {
+        file.push(("Modified".into(), t.clone()));
     }
 
     let (w, h) = m.orient.apply_size(m.width, m.height);
@@ -487,8 +485,11 @@ fn groups_height(groups: &[Group]) -> f32 {
 }
 
 pub fn sidebar_max_scroll(app: &App) -> f32 {
-    let visible = app.height() - app.content_top();
-    (groups_height(&properties(app)) - visible).max(0.0)
+    max_scroll(app, &properties(app))
+}
+
+fn max_scroll(app: &App, groups: &[Group]) -> f32 {
+    (groups_height(groups) - (app.height() - app.content_top())).max(0.0)
 }
 
 fn boxed_list(ui: &mut Ui, r: Rect) {
@@ -507,7 +508,7 @@ fn sidebar(app: &App, ui: &mut Ui) {
     ui.vline(area.x - 1.0, top, area.bottom(), t.headerbar_shade);
     ui.widget(area, Action::None, None);
     let groups = properties(app);
-    let scroll = app.props_scroll.min(sidebar_max_scroll(app));
+    let scroll = app.props_scroll.min(max_scroll(app, &groups));
     ui.cmds.push(Cmd::Clip(area));
     let fg = t.window_fg;
     let x = area.x + 12.0;
@@ -751,9 +752,8 @@ fn dialog_frame(app: &App, ui: &mut Ui, width: f32, content_h: f32, title: Optio
 
 pub fn dialog_max_scroll(app: &App) -> f32 {
     let Some(d) = app.dialog else { return 0.0 };
-    let (w, h) = dialog_size(app, d);
+    let (_, h) = dialog_size(app, d);
     let header = if matches!(d, Dialog::Send | Dialog::Replace | Dialog::Install) { 0.0 } else { HEADER_H };
-    let _ = w;
     (header + h - (app.height() - 24.0)).max(0.0)
 }
 
