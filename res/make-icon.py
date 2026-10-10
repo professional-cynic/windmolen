@@ -2,38 +2,72 @@
 # requires-python = ">=3.9"
 # dependencies = []
 # ///
-"""Renders the Windmolen app icon (256×256 RGBA PNG) without dependencies.
+"""Renders the Windmolen app icon (256x256 RGBA PNG) without dependencies.
 
-A Dutch windmill on a hill under a blue sky, in flat shapes and the
-GNOME palette: a tapered brown body with a gallery, a dark cap and four
-white sails. Shapes are sampled 4×4 per pixel for anti-aliasing.
+A Dutch windmill on flat green ground under a blue sky, as 1980s pixel art:
+a 32x32 sprite in ten flat colours, drawn with 7x7 px blocks and no
+smoothing. The sails are left-right mirror images (a lattice frame around
+each stock), so they read as sails and never as a pinwheel. Only the outline
+of the tile is anti-aliased, so its corners are truly round. Edit SPRITE to
+change the picture.
 
 Usage: uv run res/make-icon.py res/windmolen.png
 """
-import math
 import struct
 import sys
 import zlib
 
-N, SS = 256, 4
-X0, X1, R = 16.0, 240.0, 52.0  # rounded tile
+N, BLOCK, SS = 256, 7, 4           # 32 blocks x 7 px = 224 px
+X0, X1, R = 16.0, 240.0, 52.0      # rounded tile, 16 px margin
 
+# One letter per block.
+PALETTE = {
+    "a": 0x3584E4,  # sky, top
+    "b": 0x62A0EA,  # sky, bottom
+    "G": 0x33D17A,  # ground, lit
+    "g": 0x26A269,  # ground, shaded
+    "t": 0x986A44,  # tower, lit side
+    "s": 0x74512F,  # tower, shaded side
+    "d": 0x63452C,  # cap and door
+    "k": 0x4A3320,  # sail stocks and lattice
+    "w": 0xFFFFFF,  # sail cloth
+    "r": 0xC01C28,  # axle
+}
 
-def hexc(v):
-    return ((v >> 16) & 255, (v >> 8) & 255, v & 255)
-
-
-SKY_TOP, SKY_BOTTOM = hexc(0x3584E4), hexc(0x99C1F1)
-HILL, HILL_LIGHT = hexc(0x26A269), hexc(0x33D17A)
-# Brown 3 and 4: the lit and shaded halves of the body; brown 5 for wood.
-TOWER, TOWER_SHADE = hexc(0x986A44), hexc(0x865E3C)
-CAP, DOOR, STOCK = hexc(0x63452C), hexc(0x63452C), hexc(0x4A3320)
-AXLE = hexc(0xC01C28)
-SAIL = hexc(0xFFFFFF)
-
-# The axle, at the centre of the cap.
-HUB = (128.0, 106.0)
-SAIL_ANGLE = math.radians(45)
+SPRITE = [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaakkkkkkkaaaaaaaaaakkkkkkkaaaa",
+    "aaaaakwwkwwkaaaaaaaakwwkwwkaaaaa",
+    "aaaaaakwwkwwkaaaaaakwwkwwkaaaaaa",
+    "aaaaaaakkkkkkkaaaakkkkkkkaaaaaaa",
+    "aaaaaaaakwwkwwkaakwwkwwkaaaaaaaa",
+    "aaaaaaaaakwwkwwkkwwkwwkaaaaaaaaa",
+    "aaaaaaaaaaaaakaddakaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaakddkaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaddrrddaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaddrrddaaaaaaaaaaaaa",
+    "babababababaddkddkddbabababababa",
+    "bbbbbbbbbbbddkddddkddbbbbbbbbbbb",
+    "bbbbbbbbbkwwkwwkkwwkwwkbbbbbbbbb",
+    "bbbbbbbbkwwkwwktskwwkwwkbbbbbbbb",
+    "bbbbbbbkkkkkkkttsskkkkkkkbbbbbbb",
+    "bbbbbbkwwkwwktttssskwwkwwkbbbbbb",
+    "bbbbbkwwkwwkttttsssskwwkwwkbbbbb",
+    "bbbbkkkkkkktttttssssskkkkkkkbbbb",
+    "bbbbbbbbbbbtttttsssssbbbbbbbbbbb",
+    "bbbbbbbbbbbtttttsssssbbbbbbbbbbb",
+    "bbbbbbbbbbbtttttsssssbbbbbbbbbbb",
+    "bbbbbbbbbbbtttttsssssbbbbbbbbbbb",
+    "bbbbbbbbbbtttttddsssssbbbbbbbbbb",
+    "bbbbbbbbbbttttddddssssbbbbbbbbbb",
+    "bbbbbbbbbbttttddddssssbbbbbbbbbb",
+    "bbbbbbbbbbttttddddssssbbbbbbbbbb",
+    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+    "gggggggggggggggggggggggggggggggg",
+    "gggggggggggggggggggggggggggggggg",
+]
 
 
 def in_tile(x, y):
@@ -42,78 +76,17 @@ def in_tile(x, y):
     return X0 <= x <= X1 and X0 <= y <= X1 and (x - cx) ** 2 + (y - cy) ** 2 <= R * R
 
 
-def in_poly(x, y, pts):
-    inside = False
-    for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
-        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
-            inside = not inside
-    return inside
-
-
-def in_circle(x, y, cx, cy, r):
-    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
-
-
-def bar(angle, r0, r1, a, b):
-    """Rectangle along `angle` from the hub, lateral offset a..b."""
-    d = (math.cos(angle), math.sin(angle))
-    n = (-d[1], d[0])
-    p = lambda r, s: (HUB[0] + d[0] * r + n[0] * s, HUB[1] + d[1] * r + n[1] * s)
-    return [p(r0, a), p(r1, a), p(r1, b), p(r0, b)]
-
-
-ARMS = [SAIL_ANGLE + k * math.pi / 2 for k in range(4)]
-SAILS = [bar(a, 14, 80, 3, 26) for a in ARMS]
-STOCKS = [bar(a, 0, 84, -3, 3) for a in ARMS]
-# Lattice: cross bars on each sail.
-LATTICE = [bar(a, r, r + 3, 3, 26) for a in ARMS for r in (36, 58)]
-TOWER_PTS = [(102, 214), (154, 214), (142, 112), (114, 112)]
-TOWER_LIT = [(128, 214), (154, 214), (142, 112), (128, 112)]
-CAP_PTS = [(108, 116), (148, 116), (140, 96), (116, 96)]
-GALLERY_PTS = [(92, 162), (164, 162), (164, 170), (92, 170)]
-DOOR_PTS = [(121, 214), (135, 214), (135, 196), (128, 189), (121, 196)]
-
-
-def colour(x, y):
-    t = (y - X0) / (X1 - X0)
-    c = [a + (b - a) * t for a, b in zip(SKY_TOP, SKY_BOTTOM)]
-    if in_circle(x, y, 196, 470, 290):
-        c = HILL_LIGHT
-    if in_circle(x, y, 60, 480, 290):
-        c = HILL
-    if in_poly(x, y, TOWER_PTS):
-        c = TOWER_SHADE if in_poly(x, y, TOWER_LIT) else TOWER
-    if in_poly(x, y, DOOR_PTS) or in_poly(x, y, GALLERY_PTS):
-        c = DOOR
-    if in_poly(x, y, CAP_PTS):
-        c = CAP
-    # The sails turn in front of the cap and body.
-    if any(in_poly(x, y, s) for s in SAILS):
-        c = SAIL
-    if any(in_poly(x, y, s) for s in LATTICE + STOCKS):
-        c = STOCK
-    if in_circle(x, y, HUB[0], HUB[1], 8):
-        c = AXLE
-    return c
-
-
 rows = []
 for py in range(N):
     row = bytearray([0])
     for px in range(N):
-        acc = [0.0, 0.0, 0.0]
-        hits = 0
-        for sy in range(SS):
-            for sx in range(SS):
-                x, y = px + (sx + 0.5) / SS, py + (sy + 0.5) / SS
-                if not in_tile(x, y):
-                    continue
-                c = colour(x, y)
-                for i in range(3):
-                    acc[i] += c[i]
-                hits += 1
+        hits = sum(in_tile(px + (i + 0.5) / SS, py + (j + 0.5) / SS)
+                   for i in range(SS) for j in range(SS))
         if hits:
-            row += bytes(int(acc[i] / hits + 0.5) for i in range(3)) + bytes([int(hits / (SS * SS) * 255 + 0.5)])
+            bx = min(max((px - 16) // BLOCK, 0), 31)
+            by = min(max((py - 16) // BLOCK, 0), 31)
+            v = PALETTE[SPRITE[by][bx]]
+            row += bytes([(v >> 16) & 255, (v >> 8) & 255, v & 255, int(hits / (SS * SS) * 255 + 0.5)])
         else:
             row += b"\0\0\0\0"
     rows.append(bytes(row))

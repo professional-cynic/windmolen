@@ -1,4 +1,8 @@
-# Windmolen
+<p align="center">
+  <img src="res/windmolen.png" alt="Windmolen icon" width="128" height="128">
+</p>
+
+<h1 align="center">Windmolen</h1>
 
 A lean, fast photo viewer for Windows, designed after the GNOME HIG and
 libadwaita (colours, type scale, header bar, status pages, boxed lists,
