@@ -29,11 +29,7 @@ impl Value {
 
 pub fn exposure(v: &Value) -> Option<String> {
     let t = v.as_f64().filter(|t| *t > 0.0 && t.is_finite())?;
-    Some(if t >= 0.5 {
-        format!("{} s", trim(t, 1))
-    } else {
-        format!("1/{} s", (1.0 / t).round())
-    })
+    Some(if t >= 0.5 { format!("{} s", trim(t, 1)) } else { format!("1/{} s", (1.0 / t).round()) })
 }
 
 pub fn aperture(v: &Value) -> Option<String> {

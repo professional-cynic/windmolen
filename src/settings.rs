@@ -38,14 +38,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            mark_dirs: Default::default(),
-            marks: BTreeMap::new(),
-            placement: None,
-            properties: false,
-            auto_update: true,
-            last_update_check: 0,
-        }
+        Self { mark_dirs: Default::default(), marks: BTreeMap::new(), placement: None, properties: false, auto_update: true, last_update_check: 0 }
     }
 }
 
@@ -89,10 +82,7 @@ impl Settings {
 
     /// Every marked file as (folder, name, bits).
     pub fn marked(&self) -> Vec<(PathBuf, OsString, u16)> {
-        self.marks
-            .iter()
-            .flat_map(|(dir, files)| files.iter().map(move |(n, &b)| (dir.clone(), n.clone(), b)))
-            .collect()
+        self.marks.iter().flat_map(|(dir, files)| files.iter().map(move |(n, &b)| (dir.clone(), n.clone(), b))).collect()
     }
 
     pub fn serialise(&self) -> String {

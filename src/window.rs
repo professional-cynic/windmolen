@@ -87,7 +87,12 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
             return Err(windows::core::Error::from_thread());
         }
 
-        let host = Box::into_raw(Box::new(Host { app: RefCell::new(None), icons: Cell::new([None, None]), restore: Cell::new(None), tracking: Cell::new(false) }));
+        let host = Box::into_raw(Box::new(Host {
+            app: RefCell::new(None),
+            icons: Cell::new([None, None]),
+            restore: Cell::new(None),
+            tracking: Cell::new(false),
+        }));
         let scale = GetDpiForSystem() as f32 / 96.0;
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -335,7 +340,9 @@ impl Host {
             if on {
                 let mut wp = WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
                 let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-                if GetWindowPlacement(hwnd, &mut wp).is_err() || !GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool() {
+                if GetWindowPlacement(hwnd, &mut wp).is_err()
+                    || !GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool()
+                {
                     return;
                 }
                 self.restore.set(Some(wp));
@@ -416,7 +423,12 @@ impl Host {
                 WM_NCMOUSEMOVE => {
                     let on = wp.0 == HTMAXBUTTON as usize;
                     self.with(|a| a.nc_hover(on));
-                    let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE | TME_NONCLIENT, hwndTrack: hwnd, dwHoverTime: 0 };
+                    let mut t = TRACKMOUSEEVENT {
+                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE | TME_NONCLIENT,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
                     let _ = TrackMouseEvent(&mut t);
                     self.after(hwnd);
                     if on {
@@ -444,7 +456,12 @@ impl Host {
                 }
                 WM_MOUSEMOVE => {
                     if !self.tracking.get() {
-                        let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                        let mut t = TRACKMOUSEEVENT {
+                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                            dwFlags: TME_LEAVE,
+                            hwndTrack: hwnd,
+                            dwHoverTime: 0,
+                        };
                         self.tracking.set(TrackMouseEvent(&mut t).is_ok());
                     }
                     let (px, py) = point(lp);

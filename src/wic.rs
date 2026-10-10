@@ -322,9 +322,7 @@ pub fn decode(f: &IWICImagingFactory, path: &Path, max_edge: u32) -> std::result
     let wide = HSTRING::from(path.as_os_str());
     // SAFETY: COM calls on valid objects; buffers sized from checked maths.
     unsafe {
-        let dec = f
-            .CreateDecoderFromFilename(&wide, None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)
-            .map_err(|e| describe(&e))?;
+        let dec = f.CreateDecoderFromFilename(&wide, None, GENERIC_READ, WICDecodeMetadataCacheOnDemand).map_err(|e| describe(&e))?;
         let frame = dec.GetFrame(0).map_err(|e| describe(&e))?;
         let mut meta = read_meta(f, &dec, &frame, path).map_err(|e| describe(&e))?;
         let (sw, sh) = (meta.width, meta.height);

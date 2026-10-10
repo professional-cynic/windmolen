@@ -273,7 +273,11 @@ pub fn uninstall() -> Result<(), String> {
     if !dir.ends_with(NAME) {
         return Ok(());
     }
-    let running_from_dir = std::env::current_exe().ok().and_then(|p| std::fs::canonicalize(p).ok()).zip(std::fs::canonicalize(&dir).ok()).is_some_and(|(p, d)| p.starts_with(d));
+    let running_from_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .zip(std::fs::canonicalize(&dir).ok())
+        .is_some_and(|(p, d)| p.starts_with(d));
     if running_from_dir {
         // A running program cannot delete itself: let cmd do it once we exit.
         let d = dir.display().to_string();

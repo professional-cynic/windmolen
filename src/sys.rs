@@ -9,16 +9,14 @@ use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HANDLE, HWND, LPARAM, SYSTEMTIME, WAIT_ABANDONED,
-    WAIT_OBJECT_0, WPARAM,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HANDLE, HWND, LPARAM, SYSTEMTIME, WAIT_ABANDONED, WAIT_OBJECT_0,
+    WPARAM,
 };
-use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::Globalization::{DATE_SHORTDATE, GetDateFormatEx, GetTimeFormatEx, TIME_NOSECONDS};
-use windows::Win32::Storage::FileSystem::{
-    CopyFileW, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACE_FILE_FLAGS, ReplaceFileW,
-};
+use windows::Win32::Storage::FileSystem::{CopyFileW, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACE_FILE_FLAGS, ReplaceFileW};
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
@@ -211,9 +209,7 @@ fn reg_dword(key: PCWSTR, value: PCWSTR) -> Option<u32> {
     let mut data = 0u32;
     let mut size = 4u32;
     // SAFETY: out-pointers to locals of the declared size.
-    let r = unsafe {
-        RegGetValueW(HKEY_CURRENT_USER, key, value, RRF_RT_REG_DWORD, None, Some((&mut data as *mut u32).cast()), Some(&mut size))
-    };
+    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, key, value, RRF_RT_REG_DWORD, None, Some((&mut data as *mut u32).cast()), Some(&mut size)) };
     r.is_ok().then_some(data)
 }
 
@@ -233,9 +229,8 @@ pub fn accent_rgb() -> Option<(u8, u8, u8)> {
 pub fn animations_enabled() -> bool {
     let mut on = BOOL(1);
     // SAFETY: SPI_GETCLIENTAREAANIMATION writes a BOOL to the pointer.
-    let ok = unsafe {
-        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some((&mut on as *mut BOOL).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
-    };
+    let ok =
+        unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some((&mut on as *mut BOOL).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) };
     ok.is_err() || on.as_bool()
 }
 
@@ -354,10 +349,8 @@ pub fn publish_copy(tmp: &Path, original: &Path, ext: &OsStr) -> std::result::Re
 /// attributes and permissions.
 pub fn replace_with(original: &Path, tmp: &Path) -> std::result::Result<(), String> {
     // SAFETY: NUL-terminated paths on the same volume.
-    unsafe {
-        ReplaceFileW(&HSTRING::from(original.as_os_str()), &HSTRING::from(tmp.as_os_str()), PCWSTR::null(), REPLACE_FILE_FLAGS(0), None, None)
-    }
-    .map_err(|e| e.message())
+    unsafe { ReplaceFileW(&HSTRING::from(original.as_os_str()), &HSTRING::from(tmp.as_os_str()), PCWSTR::null(), REPLACE_FILE_FLAGS(0), None, None) }
+        .map_err(|e| e.message())
 }
 
 /// Creates a new, empty temporary file next to `near` and returns its path.

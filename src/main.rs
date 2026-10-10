@@ -54,7 +54,13 @@ fn main() {
             let exts: Vec<String> = wic::Wic::new().map(|w| w.extensions().into_iter().collect()).unwrap_or_default();
             match install::install(&exts) {
                 Ok(exe) => {
-                    message(format!("Installed to {}.\n\nChoose Windmolen as your default image viewer in the Settings page that opens next.", exe.display()), MB_OK | MB_ICONINFORMATION);
+                    message(
+                        format!(
+                            "Installed to {}.\n\nChoose Windmolen as your default image viewer in the Settings page that opens next.",
+                            exe.display()
+                        ),
+                        MB_OK | MB_ICONINFORMATION,
+                    );
                     install::open_default_apps();
                 }
                 Err(e) => {
@@ -75,11 +81,8 @@ fn main() {
     }
 
     // Absolute, because a gathering instance has its own working directory.
-    let files: Vec<std::path::PathBuf> = args
-        .into_iter()
-        .filter(|a| !a.as_os_str().as_encoded_bytes().starts_with(b"--"))
-        .map(|a| std::path::absolute(&a).unwrap_or(a))
-        .collect();
+    let files: Vec<std::path::PathBuf> =
+        args.into_iter().filter(|a| !a.as_os_str().as_encoded_bytes().starts_with(b"--")).map(|a| std::path::absolute(&a).unwrap_or(a)).collect();
     if let instance::Launch::Forwarded = instance::start(&files) {
         return;
     }

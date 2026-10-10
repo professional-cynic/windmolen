@@ -40,8 +40,13 @@ fn system_ui_font() -> Option<HSTRING> {
     let mut m = NONCLIENTMETRICSW { cbSize: std::mem::size_of::<NONCLIENTMETRICSW>() as u32, ..Default::default() };
     // SAFETY: the struct size is set as the API requires.
     unsafe {
-        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, m.cbSize, Some((&mut m as *mut NONCLIENTMETRICSW).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
-            .ok()?;
+        SystemParametersInfoW(
+            SPI_GETNONCLIENTMETRICS,
+            m.cbSize,
+            Some((&mut m as *mut NONCLIENTMETRICSW).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .ok()?;
     }
     let face = &m.lfMessageFont.lfFaceName;
     let len = face.iter().position(|&c| c == 0).unwrap_or(face.len());
@@ -254,14 +259,7 @@ impl Renderer {
         };
         assert_eq!(pixels.len(), size.0 as usize * size.1 as usize * 4);
         // SAFETY: `pixels` holds exactly width × height × 4 bytes (asserted).
-        unsafe {
-            t.rt.CreateBitmap(
-                D2D_SIZE_U { width: size.0, height: size.1 },
-                Some(pixels.as_ptr().cast()),
-                size.0 * 4,
-                &props,
-            )
-        }
+        unsafe { t.rt.CreateBitmap(D2D_SIZE_U { width: size.0, height: size.1 }, Some(pixels.as_ptr().cast()), size.0 * 4, &props) }
     }
 
     /// A `size` copy of `b`, scaled on the GPU with high-quality cubic
@@ -318,14 +316,10 @@ impl Renderer {
                         open = true;
                     }
                     Seg::Line(x, y) => sink.AddLine(v2(x, y)),
-                    Seg::Cubic(x1, y1, x2, y2, x, y) => sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                        point1: v2(x1, y1),
-                        point2: v2(x2, y2),
-                        point3: v2(x, y),
-                    }),
-                    Seg::Quad(x1, y1, x, y) => {
-                        sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT { point1: v2(x1, y1), point2: v2(x, y) })
+                    Seg::Cubic(x1, y1, x2, y2, x, y) => {
+                        sink.AddBezier(&D2D1_BEZIER_SEGMENT { point1: v2(x1, y1), point2: v2(x2, y2), point3: v2(x, y) })
                     }
+                    Seg::Quad(x1, y1, x, y) => sink.AddQuadraticBezier(&D2D1_QUADRATIC_BEZIER_SEGMENT { point1: v2(x1, y1), point2: v2(x, y) }),
                     Seg::Close => {
                         if open {
                             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
@@ -399,11 +393,7 @@ impl Renderer {
                     Cmd::Image { m, smooth } => {
                         if let Some(b) = image {
                             dc.SetTransform(&matrix(*m));
-                            let mode = if *smooth {
-                                D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC
-                            } else {
-                                D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR
-                            };
+                            let mode = if *smooth { D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC } else { D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR };
                             dc.DrawBitmap(b, None, 1.0, mode, None, None);
                             dc.SetTransform(&id);
                         }

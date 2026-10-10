@@ -93,14 +93,52 @@ pub enum Align {
 
 #[derive(Clone, Debug)]
 pub enum Cmd {
-    Fill { r: Rect, radius: f32, c: Color },
-    Stroke { r: Rect, radius: f32, c: Color, w: f32 },
-    Line { x0: f32, y0: f32, x1: f32, y1: f32, c: Color, w: f32 },
-    Text { r: Rect, s: String, style: TextStyle, c: Color, align: Align, wrap: bool },
-    Icon { icon: Icon, r: Rect, c: Color },
+    Fill {
+        r: Rect,
+        radius: f32,
+        c: Color,
+    },
+    Stroke {
+        r: Rect,
+        radius: f32,
+        c: Color,
+        w: f32,
+    },
+    Line {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        c: Color,
+        w: f32,
+    },
+    Text {
+        r: Rect,
+        s: String,
+        style: TextStyle,
+        c: Color,
+        align: Align,
+        wrap: bool,
+    },
+    Icon {
+        icon: Icon,
+        r: Rect,
+        c: Color,
+    },
     /// Draws the current image; `m` maps bitmap pixels to DIPs.
-    Image { m: Affine, smooth: bool },
-    Arc { cx: f32, cy: f32, radius: f32, start: f32, sweep: f32, c: Color, w: f32 },
+    Image {
+        m: Affine,
+        smooth: bool,
+    },
+    Arc {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        start: f32,
+        sweep: f32,
+        c: Color,
+        w: f32,
+    },
     Clip(Rect),
     Unclip,
 }
@@ -154,16 +192,7 @@ pub struct Ui<'a> {
 
 impl<'a> Ui<'a> {
     pub fn new(t: &'a Theme, m: &'a dyn Measure) -> Self {
-        Self {
-            cmds: Vec::with_capacity(256),
-            widgets: Vec::with_capacity(64),
-            t,
-            m,
-            hover: None,
-            pressed: None,
-            focus: None,
-            alpha: 1.0,
-        }
+        Self { cmds: Vec::with_capacity(256), widgets: Vec::with_capacity(64), t, m, hover: None, pressed: None, focus: None, alpha: 1.0 }
     }
 
     pub fn fill(&mut self, r: Rect, radius: f32, c: Color) {
@@ -301,7 +330,13 @@ impl<'a> Ui<'a> {
         };
 
         if style == Style::Control {
-            let a = if active { 0.3 } else if hover { 0.15 } else { 0.1 };
+            let a = if active {
+                0.3
+            } else if hover {
+                0.15
+            } else {
+                0.1
+            };
             let c = r.centred(24.0, 24.0);
             self.fill(c, 12.0, fg.alpha(a * k));
         } else {
@@ -331,16 +366,7 @@ impl<'a> Ui<'a> {
 
     /// A popover menu row with optional check mark and accelerator.
     #[allow(clippy::too_many_arguments)]
-    pub fn menu_item(
-        &mut self,
-        r: Rect,
-        action: Action,
-        label: &str,
-        accel: Option<&str>,
-        check: Option<bool>,
-        enabled: bool,
-        fg: Color,
-    ) {
+    pub fn menu_item(&mut self, r: Rect, action: Action, label: &str, accel: Option<&str>, check: Option<bool>, enabled: bool, fg: Color) {
         let (hover, active) = if enabled { self.state(action) } else { (false, false) };
         let k = if enabled { 1.0 } else { DISABLED_OPACITY };
         if hover || active || self.focus == Some(action) {

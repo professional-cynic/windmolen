@@ -80,7 +80,20 @@ pub fn start(paths: &[PathBuf]) -> Launch {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: instance.into(), lpszClassName: CLASS, ..Default::default() };
         RegisterClassW(&wc);
-        if let Ok(h) = CreateWindowExW(WINDOW_EX_STYLE::default(), CLASS, PCWSTR::null(), WINDOW_STYLE::default(), 0, 0, 0, 0, Some(HWND_MESSAGE), None, Some(instance.into()), None) {
+        if let Ok(h) = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            CLASS,
+            PCWSTR::null(),
+            WINDOW_STYLE::default(),
+            0,
+            0,
+            0,
+            0,
+            Some(HWND_MESSAGE),
+            None,
+            Some(instance.into()),
+            None,
+        ) {
             let now = Instant::now();
             *STATE.lock().unwrap_or_else(|p| p.into_inner()) = Some(State { started: now, last: now, inbox: Vec::new() });
             SetTimer(Some(h), TIMER, 100, None);

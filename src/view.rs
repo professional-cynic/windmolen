@@ -154,13 +154,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         let buttons: [(Action, Icon, bool, bool, &str); 5] = [
             (Action::MainMenu, Icon::OpenMenu, true, app.popover == Some(Popover::Main), "Main Menu (F10)"),
             (Action::Properties, Icon::Info, has, app.settings.properties, "Properties (F9)"),
-            (
-                Action::MarksMenu,
-                if marked { Icon::BookmarkFilled } else { Icon::Bookmark },
-                true,
-                app.popover == Some(Popover::Marks),
-                "Marks (M)",
-            ),
+            (Action::MarksMenu, if marked { Icon::BookmarkFilled } else { Icon::Bookmark }, true, app.popover == Some(Popover::Marks), "Marks (M)"),
             (Action::Edit, Icon::Edit, app.can_edit(), false, "Edit (E)"),
             (Action::Fullscreen, Icon::Fullscreen, true, false, "Fullscreen (F11)"),
         ];
@@ -377,7 +371,12 @@ fn edit_canvas(app: &App, ui: &mut Ui) {
     let len = 18.0f32.min(c.w / 3.0).min(c.h / 3.0);
     let i = 2.0;
     let mut handles: Vec<(f32, f32, f32, f32)> = Vec::new();
-    for (x, y, sx, sy) in [(c.x + i, c.y + i, 1.0, 1.0), (c.right() - i, c.y + i, -1.0, 1.0), (c.x + i, c.bottom() - i, 1.0, -1.0), (c.right() - i, c.bottom() - i, -1.0, -1.0)] {
+    for (x, y, sx, sy) in [
+        (c.x + i, c.y + i, 1.0, 1.0),
+        (c.right() - i, c.y + i, -1.0, 1.0),
+        (c.x + i, c.bottom() - i, 1.0, -1.0),
+        (c.right() - i, c.bottom() - i, -1.0, -1.0),
+    ] {
         handles.push((x, y, x + sx * len, y));
         handles.push((x, y, x, y + sy * len));
     }
@@ -471,7 +470,8 @@ fn properties(app: &App) -> Vec<Group> {
     }
     let bits = app.current_marks();
     if bits != 0 {
-        let names: Vec<String> = (0..SLOTS).filter(|s| bits & (1 << s) != 0).map(|s| app.mark_label(s).unwrap_or_else(|| format!("{}", s + 1))).collect();
+        let names: Vec<String> =
+            (0..SLOTS).filter(|s| bits & (1 << s) != 0).map(|s| app.mark_label(s).unwrap_or_else(|| format!("{}", s + 1))).collect();
         image.push(("Marks".into(), names.join(", ")));
     }
 
@@ -597,7 +597,9 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
             let mut v = vec![
                 entry(Action::Open, "Open…", Some("Ctrl+O")),
                 Item::Separator,
-                Item::Entry { action: Action::SendMarked, label: "Send Marked Files…".into(), accel: Some("Ctrl+M"), check: None, enabled: can_send },
+                Item::Entry {
+                    action: Action::SendMarked, label: "Send Marked Files…".into(), accel: Some("Ctrl+M"), check: None, enabled: can_send
+                },
                 entry(Action::ManageMarks, "Manage Marks…", None),
                 Item::Separator,
             ];
@@ -645,7 +647,13 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
                 })
                 .collect();
             v.push(Item::Separator);
-            v.push(Item::Entry { action: Action::SendMarked, label: "Send Marked Files…".into(), accel: Some("Ctrl+M"), check: None, enabled: can_send });
+            v.push(Item::Entry {
+                action: Action::SendMarked,
+                label: "Send Marked Files…".into(),
+                accel: Some("Ctrl+M"),
+                check: None,
+                enabled: can_send,
+            });
             v.push(entry(Action::ManageMarks, "Manage Marks…", None));
             (anchors.marks, v, false)
         }
@@ -760,39 +768,39 @@ pub fn dialog_max_scroll(app: &App) -> f32 {
 }
 
 const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
-    ("General", &[
-        ("Open", "Ctrl+O"),
-        ("Main menu", "F10"),
-        ("Keyboard shortcuts", "Ctrl+?"),
-        ("Properties", "F9 / I"),
-        ("Fullscreen", "F11"),
-        ("Close window", "Ctrl+Q"),
-    ]),
-    ("Browsing", &[
-        ("Next image", "→ / D / PgDn"),
-        ("Previous image", "← / A / PgUp"),
-        ("First / last image", "Home / End"),
-    ]),
-    ("Zoom", &[
-        ("Zoom in / out", "+ / − / wheel"),
-        ("Best fit", "F / Ctrl+0"),
-        ("Original size", "0 / Ctrl+1"),
-        ("Toggle best fit", "Double-click"),
-        ("Move around", "Drag / arrows"),
-    ]),
-    ("Marks", &[
-        ("Toggle mark", "1 – 9"),
-        ("Marks menu", "M"),
-        ("Remove marks from image", "U"),
-        ("Send marked files", "Ctrl+M"),
-    ]),
-    ("Editing", &[
-        ("Edit image", "E"),
-        ("Rotate right / left", "R / Shift+R"),
-        ("Flip horizontally / vertically", "H / V"),
-        ("Save copy", "Ctrl+S"),
-        ("Cancel", "Esc"),
-    ]),
+    (
+        "General",
+        &[
+            ("Open", "Ctrl+O"),
+            ("Main menu", "F10"),
+            ("Keyboard shortcuts", "Ctrl+?"),
+            ("Properties", "F9 / I"),
+            ("Fullscreen", "F11"),
+            ("Close window", "Ctrl+Q"),
+        ],
+    ),
+    ("Browsing", &[("Next image", "→ / D / PgDn"), ("Previous image", "← / A / PgUp"), ("First / last image", "Home / End")]),
+    (
+        "Zoom",
+        &[
+            ("Zoom in / out", "+ / − / wheel"),
+            ("Best fit", "F / Ctrl+0"),
+            ("Original size", "0 / Ctrl+1"),
+            ("Toggle best fit", "Double-click"),
+            ("Move around", "Drag / arrows"),
+        ],
+    ),
+    ("Marks", &[("Toggle mark", "1 – 9"), ("Marks menu", "M"), ("Remove marks from image", "U"), ("Send marked files", "Ctrl+M")]),
+    (
+        "Editing",
+        &[
+            ("Edit image", "E"),
+            ("Rotate right / left", "R / Shift+R"),
+            ("Flip horizontally / vertically", "H / V"),
+            ("Save copy", "Ctrl+S"),
+            ("Cancel", "Esc"),
+        ],
+    ),
 ];
 
 fn alert_body(app: &App, d: Dialog) -> (String, String) {
@@ -867,7 +875,11 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             let buttons: Vec<(&str, Action, Style)> = match d {
                 Dialog::Send if app.send_summary().is_empty() => vec![("Close", Action::Dismiss, Style::Normal)],
                 Dialog::Send => {
-                    vec![("Cancel", Action::Dismiss, Style::Normal), ("Move", Action::SendMove, Style::Normal), ("Copy", Action::SendCopy, Style::Suggested)]
+                    vec![
+                        ("Cancel", Action::Dismiss, Style::Normal),
+                        ("Move", Action::SendMove, Style::Normal),
+                        ("Copy", Action::SendCopy, Style::Suggested),
+                    ]
                 }
                 Dialog::Install => {
                     let label = if app.installed == Some(false) { "Update" } else { "Install" };
@@ -918,7 +930,16 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             // The developer's name links to their profile, as in AdwAboutDialog.
             let dev = crate::release::OWNER;
             let dw = ui.text_width(dev, TextStyle::Body) + 24.0;
-            ui.button(Rect::new(r.cx() - dw / 2.0, y, dw, 30.0), Action::OpenProfile, Content::Label(dev), Style::Flat, t.accent, true, false, Some("GitHub Profile"));
+            ui.button(
+                Rect::new(r.cx() - dw / 2.0, y, dw, 30.0),
+                Action::OpenProfile,
+                Content::Label(dev),
+                Style::Flat,
+                t.accent,
+                true,
+                false,
+                Some("GitHub Profile"),
+            );
             y += 34.0;
             let ver = concat!("Version ", env!("CARGO_PKG_VERSION"));
             let vw = ui.text_width(ver, TextStyle::Caption) + 20.0;
@@ -926,11 +947,28 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
             ui.fill(vr, 12.0, t.accent.alpha(0.1));
             ui.text(vr, ver, TextStyle::Caption, t.accent, Align::Centre);
             y += 38.0;
-            y += ui.paragraph(r.x + 24.0, y, r.w - 48.0, "A lean, fast photo viewer.\nBuilt in Rust on Direct2D and the Windows Imaging Component.", TextStyle::Body, fg, Align::Centre);
+            y += ui.paragraph(
+                r.x + 24.0,
+                y,
+                r.w - 48.0,
+                "A lean, fast photo viewer.\nBuilt in Rust on Direct2D and the Windows Imaging Component.",
+                TextStyle::Body,
+                fg,
+                Align::Centre,
+            );
             y += 18.0;
             let label = "Project Page";
             let pw = ui.text_width(label, TextStyle::Body) + 34.0;
-            ui.button(Rect::new(r.cx() - pw / 2.0, y, pw, BTN), Action::OpenProject, Content::Label(label), Style::Normal, fg, true, false, Some(&crate::release::project_url()));
+            ui.button(
+                Rect::new(r.cx() - pw / 2.0, y, pw, BTN),
+                Action::OpenProject,
+                Content::Label(label),
+                Style::Normal,
+                fg,
+                true,
+                false,
+                Some(&crate::release::project_url()),
+            );
         }
         Dialog::ManageMarks => {
             let f = dialog_frame(app, ui, width, content_h, Some("Manage Marks"), false);

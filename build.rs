@@ -65,9 +65,9 @@ fn main() {
         let arch = target.split('-').next().unwrap_or("x86_64");
         let candidates = env::var("WINDRES").map(|w| vec![w]).unwrap_or_else(|_| vec![format!("{arch}-w64-mingw32-windres"), "windres".into()]);
         let obj = out.join("windmolen-res.o");
-        let ok = candidates.iter().any(|tool| {
-            Command::new(tool).arg("-i").arg(&rc_path).arg("-O").arg("coff").arg("-o").arg(&obj).status().is_ok_and(|s| s.success())
-        });
+        let ok = candidates
+            .iter()
+            .any(|tool| Command::new(tool).arg("-i").arg(&rc_path).arg("-O").arg("coff").arg("-o").arg(&obj).status().is_ok_and(|s| s.success()));
         if ok {
             println!("cargo:rustc-link-arg-bins={}", obj.display());
         } else {

@@ -222,7 +222,11 @@ pub fn drag_crop(handle: Handle, start: Rect, dx: f32, dy: f32, w: f32, h: f32, 
             let py = if sy > 0 { b + dy } else { t + dy };
             let mut cw = (f32::from(sx) * (px - ax)).max(m);
             let mut ch = (f32::from(sy) * (py - ay)).max(m);
-            if cw / ch > ratio { cw = ch * ratio } else { ch = cw / ratio }
+            if cw / ch > ratio {
+                cw = ch * ratio
+            } else {
+                ch = cw / ratio
+            }
             let max_w = if sx > 0 { w - ax } else { ax };
             let max_h = if sy > 0 { h - ay } else { ay };
             if cw > max_w {

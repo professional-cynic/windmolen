@@ -41,7 +41,10 @@ const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\Windmolen
 /// Work the host must do after releasing the app.
 pub enum Effect {
     OpenDialog,
-    PickMarkDir { slot: u8, toggle: bool },
+    PickMarkDir {
+        slot: u8,
+        toggle: bool,
+    },
     Fullscreen(bool),
     Minimize,
     ToggleMaximize,
@@ -57,7 +60,9 @@ pub enum Effect {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UpdateState {
     Idle,
-    Checking { manual: bool },
+    Checking {
+        manual: bool,
+    },
     /// Installed; takes effect after a restart.
     Ready(String),
 }
@@ -330,10 +335,7 @@ impl App {
     }
 
     pub fn header_visible(&self) -> bool {
-        !self.fullscreen
-            || self.edit.is_some()
-            || self.popover.is_some()
-            || (self.mouse_inside && self.mouse.1 < HEADER_H && self.pan.is_none())
+        !self.fullscreen || self.edit.is_some() || self.popover.is_some() || (self.mouse_inside && self.mouse.1 < HEADER_H && self.pan.is_none())
     }
 
     pub fn banner_visible(&self) -> bool {
@@ -446,13 +448,7 @@ impl App {
 
     fn scan(&self, dir: &Path) -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-                    .map(|e| e.path())
-                    .filter(|p| self.is_image(p))
-                    .collect()
-            })
+            .map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_file())).map(|e| e.path()).filter(|p| self.is_image(p)).collect())
             .unwrap_or_default();
         v.sort_by(|a, b| sys::natural_cmp(a, b));
         v
@@ -506,7 +502,8 @@ impl App {
             return Vec::new();
         }
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let (dir, file) = if path.is_dir() { (path.clone(), None) } else { (path.parent().map(Path::to_path_buf).unwrap_or_default(), Some(path.clone())) };
+        let (dir, file) =
+            if path.is_dir() { (path.clone(), None) } else { (path.parent().map(Path::to_path_buf).unwrap_or_default(), Some(path.clone())) };
         let mut files = self.scan(&dir);
         let index = match &file {
             Some(f) => match files.iter().position(|p| p == f) {
@@ -906,10 +903,7 @@ impl App {
 
     pub fn send_summary(&self) -> Vec<(usize, PathBuf, usize)> {
         let counts = self.settings.counts();
-        (0..SLOTS)
-            .filter(|&s| counts[s] > 0)
-            .filter_map(|s| Some((s, self.settings.mark_dirs[s].clone()?, counts[s])))
-            .collect()
+        (0..SLOTS).filter(|&s| counts[s] > 0).filter_map(|s| Some((s, self.settings.mark_dirs[s].clone()?, counts[s]))).collect()
     }
 
     fn send(&mut self, mode: SendMode) {
@@ -1172,11 +1166,7 @@ impl App {
     fn osd_target(&self) -> f32 {
         let in_osd = matches!(self.hover, Some(Action::Prev | Action::Next | Action::ZoomIn | Action::ZoomOut | Action::ZoomToggle));
         let recent = self.now - self.last_motion < OSD_IDLE;
-        if self.edit.is_none() && self.loaded().is_some() && self.dialog.is_none() && (in_osd || (recent && self.mouse_inside)) {
-            1.0
-        } else {
-            0.0
-        }
+        if self.edit.is_none() && self.loaded().is_some() && self.dialog.is_none() && (in_osd || (recent && self.mouse_inside)) { 1.0 } else { 0.0 }
     }
 
     /// Advances animations; called on every timer tick and before painting.
@@ -1217,10 +1207,7 @@ impl App {
     /// When the host should call [`tick`](Self::tick) next.
     pub fn next_wake(&self) -> Option<Duration> {
         let frame = Duration::from_millis(16);
-        let animating = self.anim.is_some()
-            || self.osd != self.osd_target()
-            || (self.toast.is_some() && self.toast_alpha() < 1.0)
-            || self.loading();
+        let animating = self.anim.is_some() || self.osd != self.osd_target() || (self.toast.is_some() && self.toast_alpha() < 1.0) || self.loading();
         if animating {
             return Some(frame);
         }
@@ -1545,12 +1532,7 @@ impl App {
 
     /// Keyboard focus traversal over the current widgets.
     fn move_focus(&mut self, forward: bool) {
-        let list: Vec<Action> = self
-            .widgets()
-            .into_iter()
-            .filter(|w| w.enabled && w.focusable)
-            .map(|w| w.action)
-            .collect();
+        let list: Vec<Action> = self.widgets().into_iter().filter(|w| w.enabled && w.focusable).map(|w| w.action).collect();
         if list.is_empty() {
             return;
         }

@@ -93,7 +93,8 @@ fn get(path: &str, limit: usize) -> Result<Vec<u8>, String> {
         let mut buf = vec![0u8; 64 * 1024];
         loop {
             let mut read = 0u32;
-            WinHttpReadData(request.0, buf.as_mut_ptr().cast(), buf.len() as u32, &mut read).map_err(|e| format!("Download interrupted: {}", e.message()))?;
+            WinHttpReadData(request.0, buf.as_mut_ptr().cast(), buf.len() as u32, &mut read)
+                .map_err(|e| format!("Download interrupted: {}", e.message()))?;
             if read == 0 {
                 break;
             }
