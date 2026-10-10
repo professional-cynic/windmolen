@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const SLOTS: usize = 9;
@@ -118,12 +118,14 @@ impl Settings {
         s
     }
 
-    /// Lenient parser: malformed or unknown lines are skipped.
-    pub fn parse(text: &str) -> Self {
+    /// Lenient parser: malformed or unknown lines are skipped. `None` when
+    /// the text is not a settings file at all.
+    pub fn parse(text: &str) -> Option<Self> {
         let mut st = Self::default();
-        let mut lines = text.lines();
+        // Notepad may add a byte-order mark.
+        let mut lines = text.trim_start_matches('\u{feff}').lines();
         if lines.next() != Some(HEADER) {
-            return st;
+            return None;
         }
         for line in lines {
             let f: Vec<&str> = line.split('\t').collect();
@@ -153,29 +155,43 @@ impl Settings {
                 _ => {}
             }
         }
-        st
+        Some(st)
     }
 
-    pub fn load(path: &Path) -> Self {
-        match fs::metadata(path) {
-            Ok(m) if m.len() <= MAX_FILE_SIZE => {}
-            _ => return Self::default(),
+    /// Reads the settings file; a missing one gives the defaults. Anything
+    /// else that cannot be read is an error, so that it is never saved over:
+    /// a passing read failure must not wipe every mark.
+    pub fn load(path: &Path) -> io::Result<Self> {
+        let mut f = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(e),
+        };
+        if f.metadata()?.len() > MAX_FILE_SIZE {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "the settings file is too large"));
         }
-        fs::read_to_string(path).map(|t| Self::parse(&t)).unwrap_or_default()
+        let mut text = String::new();
+        f.read_to_string(&mut text)?;
+        Self::parse(&text).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "not a Windmolen settings file"))
     }
 
-    /// Writes atomically: a temporary file is written, flushed and renamed.
+    /// Writes atomically: a temporary file (named per process, so windows
+    /// never share one) is written, flushed and renamed over the original.
     pub fn save(&self, path: &Path) -> io::Result<()> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("tmp");
-        {
-            let mut f = fs::File::create(&tmp)?;
-            f.write_all(self.serialise().as_bytes())?;
-            f.sync_all()?;
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        let result = fs::File::create(&tmp)
+            .and_then(|mut f| {
+                f.write_all(self.serialise().as_bytes())?;
+                f.sync_all()
+            })
+            .and_then(|()| fs::rename(&tmp, path));
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
         }
-        fs::rename(&tmp, path)
+        result
     }
 }
 
@@ -205,7 +221,7 @@ mod tests {
         s.properties = true;
         s.auto_update = false;
         s.last_update_check = 1_790_000_000;
-        let t = Settings::parse(&s.serialise());
+        let t = Settings::parse(&s.serialise()).unwrap();
         assert_eq!(t, s);
         assert_eq!(t.counts(), [1, 0, 1, 0, 0, 0, 0, 0, 1]);
     }
@@ -221,10 +237,29 @@ mod tests {
     #[test]
     fn rejects_hostile_input() {
         let t = "windmolen 1\nmark\tC:\\x\t..\\..\\evil\t1\nmark\tC:\\x\tok.jpg\tnope\ndir\t0\tX\ndir\t10\tY\nwindow\t1\t2\t-3\t4\t0\n";
-        let s = Settings::parse(t);
+        let s = Settings::parse(t).unwrap();
         assert!(s.marked().is_empty());
         assert!(s.mark_dirs.iter().all(Option::is_none));
         assert!(s.placement.is_none());
-        assert_eq!(Settings::parse("garbage\nmark\ta\tb\t1"), Settings::default());
+        assert_eq!(Settings::parse("garbage\nmark\ta\tb\t1"), None);
+        assert_eq!(Settings::parse("\u{feff}windmolen 1\nproperties\t1\n").map(|s| s.properties), Some(true));
+    }
+
+    #[test]
+    fn unreadable_files_are_errors() {
+        let dir = std::env::temp_dir().join(format!("windmolen-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.txt");
+        // Missing: the defaults.
+        assert_eq!(Settings::load(&path).unwrap(), Settings::default());
+        // Not a settings file: an error, never silently the defaults.
+        fs::write(&path, "something else").unwrap();
+        assert_eq!(Settings::load(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        let mut s = Settings::default();
+        s.toggle(Path::new("C:\\x"), OsStr::new("a.jpg"), 1);
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), s);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no temporary file left");
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

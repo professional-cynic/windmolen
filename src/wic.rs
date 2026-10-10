@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
 
 use windows::Win32::Foundation::{
     GENERIC_READ, GENERIC_WRITE, WINCODEC_ERR_BADHEADER, WINCODEC_ERR_BADIMAGE, WINCODEC_ERR_BADSTREAMDATA, WINCODEC_ERR_COMPONENTNOTFOUND,
@@ -19,6 +18,7 @@ use windows::Win32::System::Variant::*;
 use windows::core::{GUID, HSTRING, IUnknown, Interface, PCWSTR, Result, w};
 
 use crate::edit::Orient;
+use crate::geom::fit_edge;
 use crate::meta::{self, Value};
 use crate::sys::Poster;
 
@@ -333,12 +333,8 @@ pub fn decode(f: &IWICImagingFactory, path: &Path, max_edge: u32) -> std::result
         }
 
         let mut src: IWICBitmapSource = frame.cast().map_err(|e| describe(&e))?;
-        let (mut w, mut h) = (sw, sh);
-        let max_edge = max_edge.max(256);
-        if w > max_edge || h > max_edge {
-            let s = f64::from(max_edge) / f64::from(w.max(h));
-            w = ((f64::from(w) * s).round() as u32).clamp(1, max_edge);
-            h = ((f64::from(h) * s).round() as u32).clamp(1, max_edge);
+        let (w, h) = fit_edge(sw, sh, max_edge.max(256));
+        if (w, h) != (sw, sh) {
             let scaler = f.CreateBitmapScaler().map_err(|e| describe(&e))?;
             scaler.Initialize(&src, w, h, WICBitmapInterpolationModeHighQualityCubic).map_err(|e| describe(&e))?;
             src = scaler.cast().map_err(|e| describe(&e))?;
@@ -380,18 +376,21 @@ pub fn describe(e: &windows::core::Error) -> String {
 // Background decoding
 // ------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct Job {
     pub path: PathBuf,
+    /// Longest edge wanted; larger images are scaled down.
     pub max_edge: u32,
 }
 
-pub type Outcome = (PathBuf, std::result::Result<Decoded, String>);
+/// A job and its result.
+pub type Outcome = (Job, std::result::Result<Decoded, String>);
 
 #[derive(Default)]
 struct Queue {
     jobs: Vec<Job>,
-    /// The image being decoded right now.
-    busy: Option<PathBuf>,
+    /// The job being decoded right now.
+    busy: Option<Job>,
     quit: bool,
 }
 
@@ -399,14 +398,13 @@ struct Queue {
 /// pending work, so rapid browsing never builds a backlog.
 pub struct Decoder {
     shared: Arc<(Mutex<Queue>, Condvar)>,
-    thread: Option<JoinHandle<()>>,
 }
 
 impl Decoder {
     pub fn new(out: Poster<Outcome>) -> Self {
         let shared = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
         let s = Arc::clone(&shared);
-        let thread = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let _com = crate::sys::ComGuard::mta();
             let Ok(wic) = Wic::new() else { return };
             let (lock, cv) = &*s;
@@ -421,37 +419,36 @@ impl Decoder {
                         return;
                     }
                     let job = q.jobs.remove(0);
-                    q.busy = Some(job.path.clone());
+                    q.busy = Some(job.clone());
                     job
                 };
                 let result = decode(&wic.0, &job.path, job.max_edge);
-                if !out.send((job.path, result)) {
+                if !out.send((job, result)) {
                     return;
                 }
             }
         });
-        Self { shared, thread: Some(thread) }
+        Self { shared }
     }
 
-    /// Replaces all pending jobs, first one first. The image being decoded
-    /// right now is not queued again: its result is on the way.
+    /// Replaces all pending jobs, first one first. A job that the one being
+    /// decoded right now already covers is dropped: its result is on the way.
     pub fn request(&self, mut jobs: Vec<Job>) {
         let (lock, cv) = &*self.shared;
         let mut q = lock.lock().unwrap_or_else(|p| p.into_inner());
-        jobs.retain(|j| q.busy.as_ref() != Some(&j.path));
+        jobs.retain(|j| !q.busy.as_ref().is_some_and(|b| b.path == j.path && b.max_edge >= j.max_edge));
         q.jobs = jobs;
         cv.notify_one();
     }
 }
 
+/// Stops the thread after its current image. It is not waited for: a
+/// large decode would only delay the exit, which ends the thread anyway.
 impl Drop for Decoder {
     fn drop(&mut self) {
         let (lock, cv) = &*self.shared;
         lock.lock().unwrap_or_else(|p| p.into_inner()).quit = true;
         cv.notify_one();
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
     }
 }
 

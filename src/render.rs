@@ -264,6 +264,30 @@ impl Renderer {
         }
     }
 
+    /// A `size` copy of `b`, scaled on the GPU with high-quality cubic
+    /// filtering: cheaper than decoding the file again.
+    pub fn shrink(&mut self, b: &ID2D1Bitmap, size: (u32, u32), win: (u32, u32)) -> Result<ID2D1Bitmap> {
+        let t = self.target(win.0, win.1)?.clone();
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        // SAFETY: drawing happens between BeginDraw and EndDraw on a fresh
+        // target; every pointer argument refers to a local.
+        unsafe {
+            // Equal DIP and pixel sizes give the copy 96 DPI, as decoded bitmaps have.
+            let rt = t.rt.CreateCompatibleRenderTarget(
+                Some(&D2D_SIZE_F { width: w, height: h }),
+                Some(&D2D_SIZE_U { width: size.0, height: size.1 }),
+                None,
+                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+            )?;
+            let dc: ID2D1DeviceContext = rt.cast()?;
+            rt.BeginDraw();
+            let dest = D2D_RECT_F { left: 0.0, top: 0.0, right: w, bottom: h };
+            dc.DrawBitmap(b, Some(&dest), 1.0, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, None, None);
+            rt.EndDraw(None, None)?;
+            rt.GetBitmap()
+        }
+    }
+
     fn icon_geometry(&mut self, icon: Icon) -> Result<Vec<(ID2D1PathGeometry, Paint)>> {
         if let Some(g) = self.icons.get(&icon) {
             return Ok(g.clone());

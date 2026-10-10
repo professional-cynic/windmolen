@@ -83,7 +83,10 @@ fn main() {
     if let instance::Launch::Forwarded = instance::start(&files) {
         return;
     }
-    if let Err(e) = window::run(files) {
+    let result = window::run(files);
+    // Exiting ends the worker threads; never in the middle of an update.
+    std::mem::forget(update::hold_for_exit());
+    if let Err(e) = result {
         message(format!("Windmolen could not start.\n\n{}", e.message()), MB_OK | MB_ICONERROR);
     }
 }

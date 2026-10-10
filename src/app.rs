@@ -68,6 +68,9 @@ pub struct Loaded {
     pub bw: u32,
     pub bh: u32,
     pub meta: Meta,
+    /// No better bitmap is needed or possible: decoded at its own size or
+    /// at the device maximum, or an attempt to do so failed.
+    pub full: bool,
 }
 
 pub enum Slot {
@@ -152,7 +155,10 @@ pub struct App {
     decoded: Receiver<Outcome>,
     tasks: Poster<TaskMsg>,
     task_rx: Receiver<TaskMsg>,
+    /// Saving or sending: files are being written.
     pub busy: bool,
+    /// A close was asked for while busy; it happens once the work is done.
+    closing: bool,
     /// Whether an installed copy exists, and whether this is it.
     pub installed: Option<bool>,
     pub update: UpdateState,
@@ -164,6 +170,9 @@ pub struct App {
     animations: bool,
     pub dpi: f32,
     pub size: (u32, u32),
+    /// Longer side of the window's monitor in pixels: the largest a fitted
+    /// image can appear, and so the size neighbours are kept at.
+    screen_edge: u32,
     pub active: bool,
     pub maximised: bool,
     pub fullscreen: bool,
@@ -215,9 +224,12 @@ impl App {
         let (tx, decoded) = channel();
         let (task_tx, task_rx) = channel();
         let settings_path = sys::settings_path();
-        let settings = settings_path.as_deref().map(Settings::load).unwrap_or_default();
+        let (settings, unreadable) = match settings_path.as_deref().map(Settings::load) {
+            Some(Err(e)) => (Settings::default(), Some(e)),
+            loaded => (loaded.and_then(Result::ok).unwrap_or_default(), None),
+        };
         let now = Instant::now();
-        Ok(Self {
+        let mut app = Self {
             r,
             exts,
             ext_set,
@@ -226,6 +238,7 @@ impl App {
             tasks: Poster::new(task_tx, hwnd, WM_TASK),
             task_rx,
             busy: false,
+            closing: false,
             installed: None,
             update: UpdateState::Idle,
             settings,
@@ -234,6 +247,7 @@ impl App {
             animations: sys::animations_enabled(),
             dpi,
             size: (1, 1),
+            screen_edge: 1920,
             active: true,
             maximised: false,
             fullscreen: false,
@@ -264,7 +278,15 @@ impl App {
             toast: None,
             dirty: true,
             now,
-        })
+        };
+        if let Some(e) = unreadable {
+            app.settings_unreadable(&e);
+        }
+        Ok(app)
+    }
+
+    fn settings_unreadable(&mut self, e: &std::io::Error) {
+        self.show_toast(&format!("Could not read your settings ({e}), so changes are not saved"));
     }
 
     fn system_theme() -> Theme {
@@ -580,30 +602,78 @@ impl App {
         v
     }
 
+    /// Largest bitmap edge the device accepts: what full size means here.
+    fn full_edge(&mut self) -> u32 {
+        self.r.max_bitmap(self.size.0, self.size.1)
+    }
+
+    /// Keeps the current image at full size (for zooming) and its neighbours
+    /// at screen size (for instant browsing), and asks the decoder for what
+    /// is missing. Only one full-size bitmap is held at a time.
     fn request_decodes(&mut self) {
         // Collect finished work first, so none of it is requested again.
-        self.on_decoded();
+        self.collect_decoded();
         let wanted = self.wanted();
         self.cache.retain(|k, _| wanted.contains(k));
-        let max_edge = self.r.max_bitmap(self.size.0, self.size.1);
-        let jobs = wanted.into_iter().filter(|p| !self.cache.contains_key(p)).map(|path| Job { path, max_edge }).collect();
+        let full = self.full_edge();
+        let screen = self.screen_edge.clamp(256, full);
+        for p in wanted.iter().skip(1) {
+            self.shrink(p, screen);
+        }
+        let mut jobs: Vec<Job> = wanted
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !self.cache.contains_key(*p))
+            .map(|(i, p)| Job { path: p.clone(), max_edge: if i == 0 { full } else { screen } })
+            .collect();
+        // The current image is already on screen: prefetching comes first.
+        if let Some(cur) = wanted.first() {
+            if matches!(self.cache.get(cur), Some(Slot::Ready(l)) if !l.full) {
+                jobs.push(Job { path: cur.clone(), max_edge: full });
+            }
+        }
         self.decoder.request(jobs);
     }
 
+    /// Replaces a bitmap larger than `edge` with a copy scaled on the GPU.
+    fn shrink(&mut self, path: &Path, edge: u32) {
+        let Some(Slot::Ready(l)) = self.cache.get_mut(path) else { return };
+        let (w, h) = crate::geom::fit_edge(l.bw, l.bh, edge);
+        if (w, h) == (l.bw, l.bh) {
+            return;
+        }
+        if let Ok(bitmap) = self.r.shrink(&l.bitmap, (w, h), self.size) {
+            *l = Loaded { bitmap, bw: w, bh: h, meta: l.meta.clone(), full: false };
+        }
+    }
+
     pub fn on_decoded(&mut self) {
+        // Also asks for whatever the new results leave missing, such as
+        // the full-size version of a preview that is now current.
+        self.request_decodes();
+    }
+
+    fn collect_decoded(&mut self) {
         let wanted = self.wanted();
-        while let Ok((path, result)) = self.decoded.try_recv() {
-            if !wanted.contains(&path) {
+        let full_edge = self.full_edge();
+        while let Ok((job, result)) = self.decoded.try_recv() {
+            if !wanted.contains(&job.path) {
                 continue;
             }
-            let slot = match result {
-                Ok(d) => match self.r.bitmap((d.w, d.h), self.size, &d.pixels) {
-                    Ok(bitmap) => Slot::Ready(Loaded { bitmap, bw: d.w, bh: d.h, meta: d.meta }),
-                    Err(e) => Slot::Failed(wic::describe(&e)),
-                },
-                Err(e) => Slot::Failed(e),
-            };
-            self.cache.insert(path, slot);
+            let loaded = result.and_then(|d| {
+                let full = job.max_edge >= full_edge || (d.w, d.h) == (d.meta.width, d.meta.height);
+                let bitmap = self.r.bitmap((d.w, d.h), self.size, &d.pixels).map_err(|e| wic::describe(&e))?;
+                Ok(Loaded { bitmap, bw: d.w, bh: d.h, meta: d.meta, full })
+            });
+            match (self.cache.get_mut(&job.path), loaded) {
+                // A preview never replaces a full-size bitmap.
+                (Some(Slot::Ready(old)), Ok(new)) if old.full && !new.full => {}
+                // When the full size cannot be had, the preview has to do.
+                (Some(Slot::Ready(old)), Err(_)) => old.full = true,
+                (_, new) => {
+                    self.cache.insert(job.path, new.map_or_else(Slot::Failed, Slot::Ready));
+                }
+            }
             self.dirty = true;
         }
     }
@@ -937,7 +1007,10 @@ impl App {
         let mut fx = Vec::new();
         while let Ok(m) = self.task_rx.try_recv() {
             match m {
-                TaskMsg::Progress(s) => self.show_sticky(&s),
+                TaskMsg::Progress(s) => {
+                    let s = if self.closing { format!("{s} Then closing.") } else { s };
+                    self.show_sticky(&s);
+                }
                 TaskMsg::Update { outcome, manual } => {
                     if manual {
                         self.toast = None;
@@ -966,7 +1039,11 @@ impl App {
                     let files = if n == 1 { "file" } else { "files" };
                     let msg = match failed.first() {
                         None => format!("{verb} {n} {files}"),
-                        Some(e) => format!("{verb} {n} {files}, {} failed — {e}", failed.len()),
+                        Some(e) => {
+                            // Stay open so the failure is seen.
+                            self.closing = false;
+                            format!("{verb} {n} {files}, {} failed — {e}", failed.len())
+                        }
                     };
                     self.show_toast(&msg);
                     if mode == SendMode::Move {
@@ -990,13 +1067,32 @@ impl App {
                             }
                             fx.extend(self.rescan());
                         }
-                        Err(e) => self.show_toast(&format!("Could not save: {e}")),
+                        Err(e) => {
+                            // Stay open: the edit is still there to save again.
+                            self.closing = false;
+                            self.show_toast(&format!("Could not save: {e}"));
+                        }
                     }
                 }
             }
         }
+        if self.closing && !self.busy {
+            fx.push(Effect::Close);
+        }
         self.dirty = true;
         fx
+    }
+
+    /// Whether the window may close now. While files are being written it
+    /// closes once they are done, so no half-written file is left behind;
+    /// asking again closes at once.
+    pub fn may_close(&mut self) -> bool {
+        if !self.busy || self.closing {
+            return true;
+        }
+        self.closing = true;
+        self.show_sticky("Finishing… Close again to stop now.");
+        false
     }
 
     /// Applies `f` to the settings on disk and saves them, under a session
@@ -1004,7 +1100,16 @@ impl App {
     pub fn update_settings<R>(&mut self, f: impl FnOnce(&mut Settings) -> R) -> R {
         let Some(path) = self.settings_path.clone() else { return f(&mut self.settings) };
         let _lock = sys::NamedMutex::lock(SETTINGS_LOCK, 2000);
-        self.settings = Settings::load(&path);
+        match Settings::load(&path) {
+            Ok(s) => self.settings = s,
+            Err(e) => {
+                // Never save over a file that could not be read: this change
+                // lasts for the session only.
+                self.settings_unreadable(&e);
+                self.dirty = true;
+                return f(&mut self.settings);
+            }
+        }
         let r = f(&mut self.settings);
         if let Err(e) = self.settings.save(&path) {
             self.show_toast(&format!("Could not save settings: {e}"));
@@ -1015,8 +1120,8 @@ impl App {
 
     /// Picks up changes made by other windows.
     pub fn reload_settings(&mut self) {
-        if let Some(path) = &self.settings_path {
-            self.settings = Settings::load(path);
+        if let Some(Ok(s)) = self.settings_path.as_deref().map(Settings::load) {
+            self.settings = s;
             self.dirty = true;
         }
     }
@@ -1157,9 +1262,10 @@ impl App {
         }
     }
 
-    pub fn resize(&mut self, w: u32, h: u32, maximised: bool) {
+    pub fn resize(&mut self, w: u32, h: u32, maximised: bool, screen_edge: u32) {
         self.size = (w.max(1), h.max(1));
         self.maximised = maximised;
+        self.screen_edge = screen_edge;
         self.r.resize(self.size.0, self.size.1);
         self.view = self.clamp_view(self.view);
         self.dirty = true;

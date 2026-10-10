@@ -85,3 +85,27 @@ impl Affine {
         }
     }
 }
+
+/// Size of a `w`×`h` image scaled down so that neither edge exceeds `edge`
+/// (aspect kept, each edge at least 1); unchanged when it already fits.
+pub fn fit_edge(w: u32, h: u32, edge: u32) -> (u32, u32) {
+    if w <= edge && h <= edge {
+        return (w, h);
+    }
+    let s = f64::from(edge) / f64::from(w.max(h));
+    let scale = |v: u32| ((f64::from(v) * s).round() as u32).clamp(1, edge);
+    (scale(w), scale(h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_edge;
+
+    #[test]
+    fn edges() {
+        assert_eq!(fit_edge(6000, 4000, 1920), (1920, 1280));
+        assert_eq!(fit_edge(4000, 6000, 1920), (1280, 1920));
+        assert_eq!(fit_edge(800, 600, 1920), (800, 600));
+        assert_eq!(fit_edge(100_000, 3, 1000), (1000, 1));
+    }
+}

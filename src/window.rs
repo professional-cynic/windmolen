@@ -58,6 +58,17 @@ fn frame_thickness(hwnd: HWND) -> i32 {
     }
 }
 
+/// Longer side of the window's monitor in pixels.
+fn monitor_edge(hwnd: HWND) -> u32 {
+    let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    // SAFETY: out-pointer to a local whose size is set.
+    if !unsafe { GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut mi) }.as_bool() {
+        return 3840;
+    }
+    let r = mi.rcMonitor;
+    (r.right - r.left).max(r.bottom - r.top).max(1) as u32
+}
+
 pub fn run(args: Vec<PathBuf>) -> Result<()> {
     // SAFETY: standard window creation; the host outlives the window
     // because it is reclaimed only after the message loop has ended.
@@ -210,7 +221,8 @@ impl Host {
         unsafe {
             let _ = GetClientRect(hwnd, &mut rc);
             let max = IsZoomed(hwnd).as_bool();
-            self.with(|a| a.resize(rc.right as u32, rc.bottom as u32, max));
+            let edge = monitor_edge(hwnd);
+            self.with(|a| a.resize(rc.right as u32, rc.bottom as u32, max, edge));
         }
     }
 
@@ -554,7 +566,8 @@ impl Host {
                     if wp.0 as u32 != SIZE_MINIMIZED {
                         let (w, h) = (u32::from(loword(lp.0 as usize)), u32::from(hiword(lp.0 as usize)));
                         let max = wp.0 as u32 == SIZE_MAXIMIZED;
-                        self.with(|a| a.resize(w, h, max));
+                        let edge = monitor_edge(hwnd);
+                        self.with(|a| a.resize(w, h, max, edge));
                     }
                 }
                 WM_DPICHANGED => {
@@ -565,6 +578,7 @@ impl Host {
                     self.sync_size(hwnd);
                     self.set_icons(hwnd);
                 }
+                WM_DISPLAYCHANGE => self.sync_size(hwnd),
                 WM_GETMINMAXINFO => {
                     let mmi = &mut *(lp.0 as *mut MINMAXINFO);
                     let s = GetDpiForWindow(hwnd) as f32 / 96.0;
@@ -608,6 +622,10 @@ impl Host {
                     }
                 }
                 WM_CLOSE => {
+                    if self.with(App::may_close) == Some(false) {
+                        self.after(hwnd);
+                        return LRESULT(0);
+                    }
                     self.save_placement(hwnd);
                     return def();
                 }

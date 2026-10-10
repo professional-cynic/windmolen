@@ -240,7 +240,9 @@ fn canvas(app: &App, ui: &mut Ui) {
             .then(Affine::scale(k * v.s, k * v.s))
             .then(Affine::translate(snap(vp.cx() - v.cx * v.s), snap(vp.cy() - v.cy * v.s)));
         ui.cmds.push(Cmd::Clip(vp));
-        ui.cmds.push(Cmd::Image { m, smooth: v.s * ds < 2.0 });
+        // Source pixels show as squares from 200 %; a reduced bitmap (a
+        // preview awaiting its full size) is always smoothed.
+        ui.cmds.push(Cmd::Image { m, smooth: k > 1.0 || v.s * ds < 2.0 });
         ui.cmds.push(Cmd::Unclip);
         if app.osd > 0.01 && app.dialog.is_none() {
             osd(app, ui, vp);

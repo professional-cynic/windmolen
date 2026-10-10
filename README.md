@@ -30,7 +30,8 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 
 - Open a file (or drop it on the window) and browse its folder in Explorer's natural order.
 - Zoom with the mouse wheel or touchpad pinch, anchored at the cursor. Animated
-  zoom; double-click toggles best fit / 100 %. Drag to pan. Neighbouring images are pre-decoded.
+  zoom; double-click toggles best fit / 100 %. Drag to pan. Neighbouring images are pre-decoded at screen size; only the image
+  on screen is kept at full size, for zooming.
 - Properties sidebar: file, dimensions, colour profile, camera, lens, exposure, aperture, ISO, focal length, date taken.
 - Editing: rotate, flip and crop (free or fixed aspect ratios).
   - **Save Copy** writes `name (edited).ext`.
@@ -97,6 +98,22 @@ signed build-provenance attestation, which you can check with
 For protection even against a compromised GitHub account, releases would need
 offline code signing (Authenticode), which needs a certificate.
 
+## Security and safety
+
+- Runs with your own rights and never asks for elevation; it writes only to
+  `HKCU` and your own folders.
+- Images are decoded by Windows' codecs (WIC), which Windows Update services. The
+  app's own parsers (colour-profile names, settings, the update manifest, the
+  hand-over between instances) are bounds-checked and unit-tested.
+- Release builds load their system DLLs from System32 only, so a DLL planted next
+  to a portable copy (in Downloads, say) is never loaded. CI checks the flag.
+  Builds made with the GNU toolchain lack this protection.
+- No file is overwritten unless you confirm **Replace Original**, which swaps the
+  file atomically. Closing waits until files being saved or sent are complete
+  (closing again stops at once), and never interrupts an update being put in place.
+- A settings file that cannot be read is never saved over, so a passing read error
+  cannot wipe your marks.
+
 ## Releasing
 
 1. Bump `version` in `Cargo.toml` (`MAJOR.MINOR.PATCH`), commit and push.
@@ -138,7 +155,7 @@ cargo build --release
   (set `WINDRES` if it isn't on `PATH`). Without `windres` the app still runs, minus
   long-path support and the Explorer icon.
 - **MSVC toolchain** (needs Visual Studio Build Tools): the manifest is always embedded
-  by the linker. The Explorer icon is added when `rc.exe` is found, i.e. from a Developer prompt.
+  by the linker, which also restricts the program's DLL imports to System32. The Explorer icon is added when `rc.exe` is found, i.e. from a Developer prompt.
 
 `cargo test` runs the platform-independent unit tests (orientation algebra and
 its mapping onto WIC's flip-rotator, crop maths, colour maths, settings parser,

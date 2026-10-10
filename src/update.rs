@@ -8,6 +8,7 @@
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use windows::Win32::Networking::WinHttp::*;
 use windows::Win32::Security::Cryptography::{BCRYPT_SHA256_ALG_HANDLE, BCryptHash};
@@ -18,6 +19,15 @@ use crate::release::{self, Manifest};
 const HOST: PCWSTR = w!("github.com");
 const MAX_MANIFEST: usize = 4 * 1024;
 const MAX_EXECUTABLE: usize = 64 * 1024 * 1024;
+
+/// Held while the new program file is written and swapped in.
+static SWAPPING: Mutex<()> = Mutex::new(());
+
+/// Waits for an update that is being put in place and keeps any other from
+/// starting. Exiting between the two renames would leave no program behind.
+pub fn hold_for_exit() -> MutexGuard<'static, ()> {
+    SWAPPING.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 pub enum Outcome {
     UpToDate,
@@ -158,6 +168,7 @@ fn try_run() -> Result<Outcome, String> {
         return Err("The download is not a Windows program".into());
     }
 
+    let _swapping = hold_for_exit();
     let tmp = crate::sys::temp_beside(&exe).map_err(|e| format!("Could not write next to the program: {e}"))?;
     let result = std::fs::write(&tmp, &data).map_err(|e| format!("Could not write the update: {e}")).and_then(|()| swap(&exe, &tmp));
     if result.is_err() {
