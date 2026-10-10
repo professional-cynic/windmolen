@@ -56,8 +56,6 @@ pub enum Effect {
     ToggleMaximize,
     Close,
     Title(String),
-    Install,
-    DefaultApps,
     OpenUrl(String),
     /// Starts the (updated) program again with the current file, then closes.
     Restart(Option<PathBuf>),
@@ -199,8 +197,6 @@ pub struct App {
     work: Option<Work>,
     /// Requests to close while `work` runs: see [`may_close`](Self::may_close).
     close_requests: u8,
-    /// Whether an installed copy exists, and whether this is it.
-    pub installed: Option<bool>,
     pub update: UpdateState,
 
     pub settings: Settings,
@@ -281,7 +277,6 @@ impl App {
             task_rx,
             work: None,
             close_requests: 0,
-            installed: None,
             update: UpdateState::Idle,
             settings,
             settings_path,
@@ -1663,9 +1658,6 @@ impl App {
             Action::ClearMarkDir(slot) => {
                 self.update_settings(|st| st.mark_dirs[usize::from(slot)] = None);
             }
-            // Preferences explains what installing does next to the button.
-            Action::Install => return vec![Effect::Install],
-            Action::DefaultApps => return vec![Effect::DefaultApps],
             Action::CheckUpdates => self.check_for_updates(true),
             Action::ToggleAutoUpdate => {
                 self.update_settings(|st| st.auto_update = !st.auto_update);

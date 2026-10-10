@@ -875,31 +875,6 @@ struct PrefRow {
 }
 
 fn preferences(app: &App) -> Vec<(&'static str, Vec<PrefRow>)> {
-    let button = |label, action, style| Suffix::Button { label, action, style, enabled: true };
-    let mut install = vec![match app.installed {
-        None => PrefRow {
-            title: "Install Windmolen",
-            subtitle: "Adds it to the Start menu, Open with and the right-click menu of images, for you only. No administrator rights needed.".into(),
-            suffix: button("Install", Action::Install, Style::Suggested),
-        },
-        Some(false) => PrefRow {
-            title: "Update Installation",
-            subtitle: "Replaces the installed copy with this version".into(),
-            suffix: button("Update", Action::Install, Style::Suggested),
-        },
-        Some(true) => PrefRow {
-            title: "Image Formats",
-            subtitle: "Registers formats added since installing, such as codecs from the Microsoft Store".into(),
-            suffix: button("Register", Action::Install, Style::Normal),
-        },
-    }];
-    if app.installed.is_some() {
-        install.push(PrefRow {
-            title: "Default App",
-            subtitle: "Windows lets only you choose the app that opens images".into(),
-            suffix: button("Open Settings", Action::DefaultApps, Style::Normal),
-        });
-    }
     let status = match &app.update {
         crate::app::UpdateState::Checking { .. } => "Checking…".to_owned(),
         crate::app::UpdateState::Ready(v) => format!("Windmolen {v} is ready; restart to use it"),
@@ -922,7 +897,7 @@ fn preferences(app: &App) -> Vec<(&'static str, Vec<PrefRow>)> {
             },
         },
     ];
-    vec![("Installation", install), ("Updates", updates)]
+    vec![("Updates", updates)]
 }
 
 /// Preferences page width and its lists' inset (`AdwPreferencesPage`).

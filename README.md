@@ -52,18 +52,19 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 
 ## Installing
 
-Open the main menu › **Preferences** › **Install**, or run `windmolen.exe --install`.
-Everything is per user, so no administrator rights are needed:
+Download `Windmolen-Setup.exe` from the latest release and run it. It installs for
+you only, so no administrator rights are needed:
 
-- The program is copied to `%LOCALAPPDATA%\Programs\Windmolen` and gets a Start menu shortcut.
-- It is registered for every format WIC can currently decode:
-  - per-format ProgIDs and **Open with** entries;
-  - a right-click **Open in Windmolen** verb that shows just the chosen files, not their folder;
-  - Default-apps capabilities and an entry in Settings › Apps (which uninstalls it).
-- Windows doesn't let any app make itself the default. Installing opens Settings ›
-  Default apps on Windmolen's page, where you confirm it.
-- Opening a newer build shows **Update** in Preferences instead; it updates the installed copy, even while it is running.
-- After installing new Store codecs (HEIC, WebP, …), press **Register** in Preferences (from the installed copy) so those formats are registered too.
+- The program goes to `%LOCALAPPDATA%\Programs\Windmolen`, with a Start menu entry
+  and an entry in Settings › Apps (which uninstalls it).
+- The program registers itself (`windmolen.exe --register`) for every format WIC can
+  decode: per-format **Open with** entries, a right-click **Open in Windmolen** that
+  shows just the chosen files, and an entry in Settings › Default apps. Codecs added
+  later (HEIC, WebP, … from the Store) are registered the next time it starts.
+- Windows doesn't let any app make itself the default. The installer's last page
+  explains it: in Settings › Apps › Default apps, choose Windmolen and select
+  **Set default** (on Windows 10, choose Windmolen under Photo viewer). It can open
+  that page for you.
 - Uninstalling keeps your marks and settings in `%APPDATA%`.
 
 ### What opens
@@ -94,21 +95,21 @@ most once a day. **Check Now** checks immediately. Each check:
 
 1. Reads the latest release's `latest.txt` from `github.com` over HTTPS, using
    Windows' own WinHTTP and TLS stack.
-2. If that release is newer, downloads `windmolen.exe` and verifies its SHA-256
-   against `latest.txt` with Windows' BCrypt.
-3. Swaps the new file in next to the running one. The running program keeps going,
-   and a banner offers **Restart**.
+2. If that release is newer, downloads its `Windmolen-Setup.exe` to the temporary
+   folder and verifies its SHA-256 against `latest.txt` with Windows' BCrypt.
+3. Shows a banner offering **Restart**, which checks the file again and runs the
+   installer silently: it closes Windmolen, updates it and opens the image you
+   were viewing again.
 
-Without a restart, the new version is used the next time the app starts. This
-works for installed and portable copies alike. Nothing is sent beyond a normal
-download request. The requests carry no login, so updates only work while the
-repository is public.
+Only installed copies update; a `windmolen.exe` built or copied elsewhere doesn't.
+Nothing is sent beyond a normal download request. The requests carry no login, so
+updates only work while the repository is public.
 
 The checksum guards against corrupted or truncated downloads; authenticity comes
 from HTTPS to github.com and the release being yours. While the repository is
 public, every release also gets a signed build-provenance attestation, which you
 can check with
-`gh attestation verify windmolen.exe -R professional-cynic/windmolen`.
+`gh attestation verify Windmolen-Setup.exe -R professional-cynic/windmolen`.
 For protection even against a compromised GitHub account, releases would need
 offline code signing (Authenticode), which needs a certificate.
 
@@ -120,7 +121,7 @@ offline code signing (Authenticode), which needs a certificate.
   app's own parsers (colour-profile names, settings, the update manifest, the
   hand-over between instances) are bounds-checked and unit-tested.
 - Release builds load their system DLLs from System32 only, so a DLL planted next
-  to a portable copy (in Downloads, say) is never loaded. CI checks the flag.
+  to the program is never loaded. CI checks the flag.
   Builds made with the GNU toolchain lack this protection.
 - No file is overwritten unless you confirm **Replace Original**, which swaps the
   file atomically.
@@ -129,8 +130,7 @@ offline code signing (Authenticode), which needs a certificate.
   original stays, and marks are kept only for files not yet sent. A third close
   quits at once, for when even stopping hangs (a lost network drive).
 - Windows waits for that work before shutting down, showing why. If you shut down
-  anyway, the work stops cleanly as above. Exiting never interrupts an update
-  being put in place.
+  anyway, the work stops cleanly as above.
 - A settings file that cannot be read is never saved over, so a passing read error
   cannot wipe your marks.
 
@@ -142,9 +142,11 @@ offline code signing (Authenticode), which needs a certificate.
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml` (or, when
 started by hand, that the version is not tagged yet), runs the tests, builds with
-MSVC (manifest and Explorer icon included), attests the build and publishes
-`windmolen.exe` and `latest.txt` as a GitHub Release.
-`ci.yml` runs Clippy and the tests on every push to `main`.
+MSVC (manifest and Explorer icon included), builds the installer with Inno Setup
+(`installer/build.ps1`, a pinned and checksum-verified Inno Setup), attests it and
+publishes `Windmolen-Setup.exe` and `latest.txt` as a GitHub Release.
+`ci.yml` runs Clippy and the tests on every push to `main`, builds the installer,
+and installs, updates and uninstalls it on the runner (`installer/test.ps1`).
 
 ## Keyboard
 
@@ -171,7 +173,8 @@ rustup default stable-x86_64-pc-windows-gnu     # or -msvc
 cargo build --release
 ```
 
-`target\release\windmolen.exe` is self-contained; copy it anywhere.
+`target\release\windmolen.exe` runs from anywhere; `pwsh installer/build.ps1 -Version
+0.1.0` (after copying it to `dist\`) builds the installer.
 
 - **GNU toolchain:** `build.rs` embeds the manifest and Explorer icon via `windres`
   (set `WINDRES` if it isn't on `PATH`). Without `windres` the app still runs, minus
@@ -195,6 +198,8 @@ path parser, metadata formatting) on any OS.
 | `src/wic.rs` | Decoding thread, metadata, colour management, saving |
 | `src/sys.rs` | Shell dialogs, theme settings, locale formatting, no-overwrite file ops |
 | `src/edit.rs`, `geom.rs`, `theme.rs`, `icons.rs`, `meta.rs`, `settings.rs` | Pure, tested logic |
+| `src/install.rs`, `update.rs` | File-type registration; updates through the installer |
+| `installer/` | Inno Setup script, and the scripts CI uses to build and test it |
 
 ## Known limitations
 

@@ -54,8 +54,6 @@ pub enum Action {
     SendCopy,
     SendMove,
     ConfirmReplace,
-    Install,
-    DefaultApps,
     CheckUpdates,
     ToggleAutoUpdate,
     Restart,

@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
-use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi};
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -72,6 +72,28 @@ fn monitor_edge(hwnd: HWND) -> u32 {
     (r.right - r.left).max(r.bottom - r.top).max(1) as u32
 }
 
+/// Where a new window opens: centred on the screen under the pointer, at
+/// the remembered size (in DIPs), never larger than that screen's work area.
+fn initial_rect(placement: Option<Placement>) -> (i32, i32, i32, i32) {
+    let (w, h) = placement.map_or((1000, 700), |p| (p.w, p.h));
+    // SAFETY: out-pointers to locals whose sizes are set.
+    unsafe {
+        let mut pt = POINT::default();
+        let _ = GetCursorPos(&mut pt);
+        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let (mut dx, mut dy) = (96, 96);
+        if !GetMonitorInfoW(mon, &mut mi).as_bool() || GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy).is_err() {
+            return (CW_USEDEFAULT, CW_USEDEFAULT, w, h);
+        }
+        let s = dx as f32 / 96.0;
+        let r = mi.rcWork;
+        let (ww, wh) = (r.right - r.left, r.bottom - r.top);
+        let (w, h) = (((w as f32 * s) as i32).min(ww), ((h as f32 * s) as i32).min(wh));
+        (r.left + (ww - w) / 2, r.top + (wh - h) / 2, w, h)
+    }
+}
+
 pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
     // SAFETY: standard window creation; the host outlives the window
     // because it is reclaimed only after the message loop has ended.
@@ -97,16 +119,18 @@ pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
             tracking: Cell::new(false),
             blocking: Cell::new(false),
         }));
-        let scale = GetDpiForSystem() as f32 / 96.0;
+        // Created in place, so it starts at the right DPI for its screen.
+        let placement = sys::settings_path().and_then(|p| crate::settings::Settings::load(&p).ok()).and_then(|s| s.placement);
+        let (x, y, w, h) = initial_rect(placement);
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             CLASS,
             w!("Windmolen"),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            (1000.0 * scale) as i32,
-            (700.0 * scale) as i32,
+            x,
+            y,
+            w,
+            h,
             None,
             None,
             Some(instance),
@@ -114,7 +138,6 @@ pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
         )?;
 
         let app = App::new(hwnd, GetDpiForWindow(hwnd) as f32)?;
-        let placement = app.settings.placement;
         let dark = BOOL::from(app.theme.dark);
         (*host).app.replace(Some(app));
 
@@ -124,22 +147,7 @@ pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
         set_attr(hwnd, DWMWA_CLOAK, &BOOL(1));
         DragAcceptFiles(hwnd, true);
 
-        let mut shown = false;
-        if let Some(p) = placement {
-            let rect = RECT { left: p.x, top: p.y, right: p.x + p.w, bottom: p.y + p.h };
-            if !MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() {
-                let wp = WINDOWPLACEMENT {
-                    length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
-                    showCmd: if p.maximised { SW_SHOWMAXIMIZED.0 as u32 } else { SW_SHOWNORMAL.0 as u32 },
-                    rcNormalPosition: rect,
-                    ..Default::default()
-                };
-                shown = SetWindowPlacement(hwnd, &wp).is_ok();
-            }
-        }
-        if !shown {
-            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-        }
+        let _ = ShowWindow(hwnd, if placement.is_some_and(|p| p.maximised) { SW_SHOWMAXIMIZED } else { SW_SHOWNORMAL });
         // Apply the custom frame.
         let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         let host_ref = &*host;
@@ -151,7 +159,9 @@ pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
 
         // Housekeeping the first frame need not wait for.
         instance::set_target(hwnd);
-        host_ref.with(|a| a.installed = install::state());
+        if let Some(exts) = host_ref.with(|a| a.exts.clone()) {
+            install::refresh(&exts);
+        }
         update::clean_up();
         host_ref.with(App::maybe_check_for_updates);
 
@@ -314,37 +324,13 @@ impl Host {
                     Effect::Title(t) => {
                         let _ = SetWindowTextW(hwnd, &HSTRING::from(t));
                     }
-                    Effect::Install => {
-                        let Some(exts) = self.with(|a| a.exts.clone()) else { continue };
-                        let result = install::install(&exts);
-                        self.with(|a| {
-                            a.installed = install::state();
-                            match &result {
-                                Ok(_) => a.show_toast("Installed — choose Windmolen as the default in Settings"),
-                                Err(e) => a.show_toast(&format!("Could not install: {e}")),
-                            }
-                        });
-                        if result.is_ok() {
-                            install::open_default_apps();
-                        }
-                    }
-                    Effect::DefaultApps => install::open_default_apps(),
                     Effect::OpenUrl(url) => {
                         sys::shell_open(&url);
                     }
+                    // The installer closes this window itself, once it can.
                     Effect::Restart(file) => {
-                        let started = std::env::current_exe().and_then(|exe| {
-                            let mut cmd = std::process::Command::new(exe);
-                            cmd.args(file);
-                            cmd.spawn()
-                        });
-                        match started {
-                            Ok(_) => {
-                                let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-                            }
-                            Err(e) => {
-                                self.with(|a| a.show_toast(&format!("Could not restart: {e}")));
-                            }
+                        if let Err(e) = update::install(file.as_deref()) {
+                            self.with(|a| a.show_toast(&format!("Could not update: {e}")));
                         }
                     }
                 }
@@ -395,9 +381,10 @@ impl Host {
         };
         let r = wp.rcNormalPosition;
         let maximised = wp.showCmd == SW_SHOWMAXIMIZED.0 as u32 || (wp.flags.0 & WPF_RESTORETOMAXIMIZED.0) != 0;
-        self.with(|a| {
-            a.update_settings(|st| st.placement = Some(Placement { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, maximised }));
-        });
+        // SAFETY: plain query on our window.
+        let s = unsafe { GetDpiForWindow(hwnd) }.max(1) as f32 / 96.0;
+        let (w, h) = (((r.right - r.left) as f32 / s).round() as i32, ((r.bottom - r.top) as f32 / s).round() as i32);
+        self.with(|a| a.update_settings(|st| st.placement = Some(Placement { w, h, maximised })));
     }
 
     fn handle(&self, hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -679,8 +666,11 @@ impl Host {
                     if wp.0 != 0 {
                         self.with(App::end_session);
                         self.save_placement(hwnd);
-                        // The process ends soon: never in the middle of an update.
-                        std::mem::forget(update::hold_for_exit());
+                        // Closed for an installer (Restart Manager), not for
+                        // a shutdown: quit now rather than wait to be killed.
+                        if lp.0 as u32 & ENDSESSION_CLOSEAPP != 0 {
+                            let _ = DestroyWindow(hwnd);
+                        }
                     }
                     return LRESULT(0);
                 }

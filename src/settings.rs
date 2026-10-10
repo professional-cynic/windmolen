@@ -12,11 +12,10 @@ pub const SLOTS: usize = 9;
 const HEADER: &str = "windmolen 1";
 const MAX_FILE_SIZE: u64 = 32 * 1024 * 1024;
 
-/// Window placement: normal-position rectangle and maximised flag.
+/// Window size in DIPs (not maximised) and whether it was maximised. Like
+/// GNOME apps, windows don't keep their position: they open centred.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Placement {
-    pub x: i32,
-    pub y: i32,
     pub w: i32,
     pub h: i32,
     pub maximised: bool,
@@ -101,7 +100,7 @@ impl Settings {
             }
         }
         if let Some(p) = self.placement {
-            s += &format!("window\t{}\t{}\t{}\t{}\t{}\n", p.x, p.y, p.w, p.h, u8::from(p.maximised));
+            s += &format!("size\t{}\t{}\t{}\n", p.w, p.h, u8::from(p.maximised));
         }
         s += &format!("properties\t{}\n", u8::from(self.properties));
         s += &format!("updates\t{}\t{}\n", u8::from(self.auto_update), self.last_update_check);
@@ -130,11 +129,9 @@ impl Settings {
                         st.set_marks(Path::new(dir), OsStr::new(name), b);
                     }
                 }
-                ["window", x, y, w, h, m] => {
-                    if let (Ok(x), Ok(y), Ok(w), Ok(h)) = (x.parse(), y.parse(), w.parse(), h.parse()) {
-                        if w > 0 && h > 0 {
-                            st.placement = Some(Placement { x, y, w, h, maximised: *m == "1" });
-                        }
+                ["size", w, h, m] => {
+                    if let (Ok(w @ 1..=100_000), Ok(h @ 1..=100_000)) = (w.parse(), h.parse()) {
+                        st.placement = Some(Placement { w, h, maximised: *m == "1" });
                     }
                 }
                 ["properties", v] => st.properties = *v == "1",
@@ -207,7 +204,7 @@ mod tests {
         s.toggle(Path::new(r"C:\Photos"), OsStr::new("a.jpg"), 0);
         s.toggle(Path::new(r"C:\Photos"), OsStr::new("a.jpg"), 8);
         s.toggle(Path::new(r"C:\Other"), OsStr::new("b.png"), 2);
-        s.placement = Some(Placement { x: -5, y: 10, w: 800, h: 600, maximised: true });
+        s.placement = Some(Placement { w: 800, h: 600, maximised: true });
         s.properties = true;
         s.auto_update = false;
         s.last_update_check = 1_790_000_000;
@@ -226,7 +223,7 @@ mod tests {
 
     #[test]
     fn rejects_hostile_input() {
-        let t = "windmolen 1\nmark\tC:\\x\t..\\..\\evil\t1\nmark\tC:\\x\tok.jpg\tnope\ndir\t0\tX\ndir\t10\tY\nwindow\t1\t2\t-3\t4\t0\n";
+        let t = "windmolen 1\nmark\tC:\\x\t..\\..\\evil\t1\nmark\tC:\\x\tok.jpg\tnope\ndir\t0\tX\ndir\t10\tY\nsize\t-3\t4\t0\n";
         let s = Settings::parse(t).unwrap();
         assert!(s.marked().is_empty());
         assert!(s.mark_dirs.iter().all(Option::is_none));

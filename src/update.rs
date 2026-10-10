@@ -1,14 +1,14 @@
-//! Self-update from GitHub Releases over HTTPS (WinHTTP + Schannel).
+//! Updates from GitHub Releases over HTTPS (WinHTTP + Schannel), for the
+//! copy the installer put in place.
 //!
-//! The release's `latest.txt` names the version and the SHA-256 of the
-//! executable. A newer build is downloaded beside the running executable,
-//! verified, and swapped in: a running executable can be renamed, so the
-//! old file moves aside and is deleted on a later start. The current
-//! process keeps running the old code until it restarts.
+//! The release's `latest.txt` names the version and the SHA-256 of
+//! `Windmolen-Setup.exe`. A newer installer is downloaded to the temporary
+//! folder and verified; on **Restart** it runs silently, closes Windmolen,
+//! updates it and opens it again.
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use windows::Win32::Networking::WinHttp::*;
 use windows::Win32::Security::Cryptography::{BCRYPT_SHA256_ALG_HANDLE, BCryptHash};
@@ -18,20 +18,15 @@ use crate::release::{self, Manifest};
 
 const HOST: PCWSTR = w!("github.com");
 const MAX_MANIFEST: usize = 4 * 1024;
-const MAX_EXECUTABLE: usize = 64 * 1024 * 1024;
+const MAX_INSTALLER: usize = 64 * 1024 * 1024;
+const INSTALLER: &str = "Windmolen-Setup.exe";
 
-/// Held while the new program file is written and swapped in.
-static SWAPPING: Mutex<()> = Mutex::new(());
-
-/// Waits for an update that is being put in place and keeps any other from
-/// starting. Exiting between the two renames would leave no program behind.
-pub fn hold_for_exit() -> MutexGuard<'static, ()> {
-    SWAPPING.lock().unwrap_or_else(PoisonError::into_inner)
-}
+/// The verified installer and its SHA-256, once downloaded.
+static READY: Mutex<Option<(PathBuf, [u8; 32])>> = Mutex::new(None);
 
 pub enum Outcome {
     UpToDate,
-    /// The new version is in place; it runs after a restart.
+    /// The new version's installer is downloaded and verified.
     Ready(String),
     Failed(String),
 }
@@ -120,26 +115,12 @@ fn manifest() -> Result<Manifest, String> {
     release::parse_manifest(&text).ok_or_else(|| "The release manifest is malformed".into())
 }
 
-/// Moves `new` into place at `exe`; the running file moves aside first.
-fn swap(exe: &Path, new: &Path) -> Result<(), String> {
-    let old = old_name(exe);
-    std::fs::rename(exe, &old).map_err(|e| format!("Could not replace the program: {e}"))?;
-    if let Err(e) = std::fs::rename(new, exe) {
-        // Put the original back so the app keeps working.
-        let _ = std::fs::rename(&old, exe);
-        return Err(format!("Could not replace the program: {e}"));
-    }
-    Ok(())
+/// Where the installer of `version` is downloaded to.
+fn setup_path(version: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("Windmolen-Setup-{version}.exe"))
 }
 
-fn old_name(exe: &Path) -> PathBuf {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static N: AtomicU32 = AtomicU32::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
-    exe.with_file_name(format!("windmolen.old-{}-{n}.exe", std::process::id()))
-}
-
-/// Checks for a newer release and, if there is one, installs it.
+/// Checks for a newer release and, if there is one, downloads its installer.
 /// Blocking: call from a worker thread.
 pub fn run() -> Outcome {
     match try_run() {
@@ -149,43 +130,59 @@ pub fn run() -> Outcome {
 }
 
 fn try_run() -> Result<Outcome, String> {
+    if !crate::install::is_installed_copy() {
+        return Err("only installed copies update; install Windmolen with Windmolen-Setup.exe".into());
+    }
     let m = manifest()?;
     if m.version <= release::current() {
         return Ok(Outcome::UpToDate);
     }
     let version = release::version_string(m.version);
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let path = setup_path(&version);
 
-    // Another window may have installed it already.
-    if std::fs::read(&exe).ok().and_then(|d| sha256(&d).ok()) == Some(m.sha256) {
-        return Ok(Outcome::Ready(version));
+    // Another window may have downloaded it already.
+    if std::fs::read(&path).ok().and_then(|d| sha256(&d).ok()) != Some(m.sha256) {
+        let data = get(&release::latest_asset(INSTALLER), MAX_INSTALLER)?;
+        if sha256(&data)? != m.sha256 {
+            return Err("The download did not match the published checksum".into());
+        }
+        if !data.starts_with(b"MZ") {
+            return Err("The download is not a Windows program".into());
+        }
+        std::fs::write(&path, &data).map_err(|e| format!("Could not save the update: {e}"))?;
     }
-
-    let data = get(&release::latest_asset("windmolen.exe"), MAX_EXECUTABLE)?;
-    if sha256(&data)? != m.sha256 {
-        return Err("The download did not match the published checksum".into());
-    }
-    if !data.starts_with(b"MZ") {
-        return Err("The download is not a Windows program".into());
-    }
-
-    let _swapping = hold_for_exit();
-    let tmp = crate::sys::temp_beside(&exe).map_err(|e| format!("Could not write next to the program: {e}"))?;
-    let result = std::fs::write(&tmp, &data).map_err(|e| format!("Could not write the update: {e}")).and_then(|()| swap(&exe, &tmp));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result.map(|()| Outcome::Ready(version))
+    *READY.lock().unwrap_or_else(PoisonError::into_inner) = Some((path, m.sha256));
+    Ok(Outcome::Ready(version))
 }
 
-/// Deletes executables moved aside by earlier updates (once unused).
+/// Runs the downloaded installer silently: it closes every Windmolen window,
+/// updates the program and starts it again with `open`, if any.
+pub fn install(open: Option<&Path>) -> Result<(), String> {
+    let Some((path, hash)) = READY.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
+        return Err("No update has been downloaded".into());
+    };
+    // Checked again: the temporary folder is shared with other programs.
+    if std::fs::read(&path).ok().and_then(|d| sha256(&d).ok()) != Some(hash) {
+        return Err("The downloaded update has changed; check for updates again".into());
+    }
+    let mut cmd = std::process::Command::new(&path);
+    cmd.args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/UPDATE=1"]);
+    if let Some(f) = open {
+        let mut arg = std::ffi::OsString::from("/OPEN=");
+        arg.push(f);
+        cmd.arg(arg);
+    }
+    cmd.spawn().map(drop).map_err(|e| e.to_string())
+}
+
+/// Deletes installers downloaded for versions this one has caught up with.
 pub fn clean_up() {
-    let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else { return };
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(std::env::temp_dir()) else { return };
     for e in rd.flatten() {
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with("windmolen.old-") && name.ends_with(".exe") {
+        let version = name.strip_prefix("Windmolen-Setup-").and_then(|v| v.strip_suffix(".exe")).and_then(release::parse_version);
+        if version.is_some_and(|v| v <= release::current()) {
             let _ = std::fs::remove_file(e.path());
         }
     }

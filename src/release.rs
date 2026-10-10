@@ -1,10 +1,10 @@
 //! Release manifest (`latest.txt`) and version comparison; pure and tested.
 //!
-//! The manifest is published next to each release's executable:
+//! The manifest is published next to each release's installer:
 //!
 //! ```text
 //! 0.2.0
-//! <sha-256 of windmolen.exe, 64 lower-case hex digits>
+//! <sha-256 of Windmolen-Setup.exe, 64 lower-case hex digits>
 //! ```
 
 pub const OWNER: &str = "professional-cynic";

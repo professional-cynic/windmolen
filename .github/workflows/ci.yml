@@ -51,3 +51,15 @@ jobs:
           $flags = [BitConverter]::ToUInt16($b, $off + 78)
           if ($flags -ne 0x800) { throw ("DependentLoadFlags is 0x{0:X}, expected 0x800" -f $flags) }
           "DependentLoadFlags: 0x{0:X}" -f $flags
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/windmolen.exe dist/
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(\d+\.\d+\.\d+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
+          ./installer/build.ps1 -Version $version
+      # Installs, checks files and registrations, uninstalls, checks removal.
+      - name: Test the installer
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./installer/test.ps1
