@@ -7,7 +7,10 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HWND, SYSTEMTIME};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_FILE_EXISTS, FILETIME, HANDLE, HWND, SYSTEMTIME, WAIT_ABANDONED, WAIT_OBJECT_0,
+};
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::Globalization::{DATE_SHORTDATE, GetDateFormatEx, GetTimeFormatEx, TIME_NOSECONDS};
 use windows::Win32::Storage::FileSystem::{
     CopyFileW, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACE_FILE_FLAGS, ReplaceFileW,
@@ -17,7 +20,7 @@ use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegG
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
-use windows::Win32::UI::WindowsAndMessaging::{SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
+use windows::Win32::UI::WindowsAndMessaging::{SPI_GETCLIENTAREAANIMATION, SW_SHOWNORMAL, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR, Result, w};
 
 /// Initialises COM for the current thread and uninitialises it on drop.
@@ -119,11 +122,52 @@ fn set_folder(d: &IFileOpenDialog, start: Option<&Path>) {
     }
 }
 
+/// A per-user known folder such as `FOLDERID_RoamingAppData`.
+pub fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
+    // SAFETY: the returned string is owned and freed by `take_pwstr`.
+    unsafe { SHGetKnownFolderPath(id, KF_FLAG_CREATE, None) }.ok().and_then(take_pwstr).map(PathBuf::from)
+}
+
 /// `%APPDATA%\Het Plantsoen\settings.txt` (per user, no elevation needed).
 pub fn settings_path() -> Option<PathBuf> {
-    // SAFETY: the returned string is owned and freed by `take_pwstr`.
-    let base = unsafe { SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None) }.ok().and_then(take_pwstr)?;
-    Some(PathBuf::from(base).join("Het Plantsoen").join("settings.txt"))
+    Some(known_folder(&FOLDERID_RoamingAppData)?.join("Het Plantsoen").join("settings.txt"))
+}
+
+/// A session-wide named mutex, released on drop.
+pub struct NamedMutex(HANDLE);
+
+impl NamedMutex {
+    /// Waits up to `ms` milliseconds; `None` on timeout or failure.
+    pub fn lock(name: PCWSTR, ms: u32) -> Option<Self> {
+        // SAFETY: the handle is owned by the returned guard.
+        unsafe {
+            let h = CreateMutexW(None, false, name).ok()?;
+            let r = WaitForSingleObject(h, ms);
+            if r == WAIT_OBJECT_0 || r == WAIT_ABANDONED {
+                Some(Self(h))
+            } else {
+                let _ = CloseHandle(h);
+                None
+            }
+        }
+    }
+}
+
+impl Drop for NamedMutex {
+    fn drop(&mut self) {
+        // SAFETY: we own the handle and hold the mutex.
+        unsafe {
+            let _ = ReleaseMutex(self.0);
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// Opens a URI or file with its registered handler.
+pub fn shell_open(target: &str) -> bool {
+    // SAFETY: NUL-terminated strings that outlive the call.
+    let r = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(target), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+    r.0 as isize > 32
 }
 
 fn reg_dword(key: PCWSTR, value: PCWSTR) -> Option<u32> {

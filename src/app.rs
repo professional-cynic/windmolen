@@ -32,7 +32,7 @@ const ANIM: Duration = Duration::from_millis(180);
 const OSD_IDLE: Duration = Duration::from_secs(2);
 const TOAST_TIME: Duration = Duration::from_secs(3);
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
-const SAVE_DELAY: Duration = Duration::from_secs(1);
+const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\HetPlantsoen.Settings");
 
 /// Work the host must do after releasing the app.
 pub enum Effect {
@@ -43,6 +43,8 @@ pub enum Effect {
     ToggleMaximize,
     Close,
     Title(String),
+    Install,
+    DefaultApps,
 }
 
 pub struct Loaded {
@@ -73,6 +75,7 @@ pub enum Dialog {
     ManageMarks,
     Send,
     Replace,
+    Install,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -131,10 +134,11 @@ pub struct App {
     task_tx: Sender<TaskMsg>,
     task_rx: Receiver<TaskMsg>,
     pub busy: bool,
+    /// Whether an installed copy exists, and whether this is it.
+    pub installed: Option<bool>,
 
     pub settings: Settings,
     settings_path: Option<PathBuf>,
-    save_at: Option<Instant>,
 
     pub theme: Theme,
     animations: bool,
@@ -145,6 +149,10 @@ pub struct App {
     pub fullscreen: bool,
 
     pub folder: Option<PathBuf>,
+    /// Browsing an explicit set of files rather than a folder.
+    pub selection: bool,
+    /// Files this window was launched with (grows while gathering).
+    launch: Vec<PathBuf>,
     pub files: Vec<PathBuf>,
     pub index: usize,
     pub cache: HashMap<PathBuf, Slot>,
@@ -199,9 +207,9 @@ impl App {
             task_tx,
             task_rx,
             busy: false,
+            installed: None,
             settings,
             settings_path,
-            save_at: None,
             theme: Self::system_theme(),
             animations: sys::animations_enabled(),
             dpi,
@@ -210,6 +218,8 @@ impl App {
             maximised: false,
             fullscreen: false,
             folder: None,
+            selection: false,
+            launch: Vec::new(),
             files: Vec::new(),
             index: 0,
             cache: HashMap::new(),
@@ -397,6 +407,50 @@ impl App {
         v
     }
 
+    /// Opens what the window was started with: one file browses its
+    /// folder, several files are browsed on their own.
+    pub fn open_launch(&mut self, paths: Vec<PathBuf>) -> Vec<Effect> {
+        self.launch.clear();
+        self.add_launch(paths)
+    }
+
+    /// More files from the same Explorer action (see `instance`).
+    pub fn add_launch(&mut self, paths: Vec<PathBuf>) -> Vec<Effect> {
+        for p in paths {
+            let p = std::path::absolute(&p).unwrap_or(p);
+            if !self.launch.contains(&p) {
+                self.launch.push(p);
+            }
+        }
+        match self.launch.as_slice() {
+            [] => Vec::new(),
+            [one] => {
+                let one = one.clone();
+                self.open_path(&one)
+            }
+            many => {
+                let many = many.to_vec();
+                self.open_selection(many)
+            }
+        }
+    }
+
+    fn open_selection(&mut self, mut files: Vec<PathBuf>) -> Vec<Effect> {
+        files.retain(|p| p.is_file());
+        files.sort_by(|a, b| sys::natural_cmp(a, b));
+        files.dedup();
+        if files.is_empty() {
+            return Vec::new();
+        }
+        let cur = self.current().map(Path::to_path_buf);
+        let index = cur.and_then(|c| files.iter().position(|p| *p == c)).unwrap_or(0);
+        self.folder = None;
+        self.selection = true;
+        self.files = files;
+        self.index = usize::MAX;
+        self.go(index)
+    }
+
     /// Opens a file (browsing its folder) or the first image in a folder.
     pub fn open_path(&mut self, path: &Path) -> Vec<Effect> {
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
@@ -419,16 +473,23 @@ impl App {
             return Vec::new();
         }
         self.folder = Some(dir);
+        self.selection = false;
         self.files = files;
         self.cache.clear();
+        self.index = usize::MAX;
         self.go(index)
     }
 
     /// Re-reads the folder, keeping the current file when it still exists.
     fn rescan(&mut self) -> Vec<Effect> {
-        let Some(dir) = self.folder.clone() else { return Vec::new() };
         let cur = self.current().map(Path::to_path_buf);
-        self.files = self.scan(&dir);
+        if self.selection {
+            self.files.retain(|p| p.is_file());
+        } else if let Some(dir) = self.folder.clone() {
+            self.files = self.scan(&dir);
+        } else {
+            return Vec::new();
+        }
         if self.files.is_empty() {
             self.cache.clear();
             self.index = 0;
@@ -685,11 +746,14 @@ impl App {
     // Marks
     // --------------------------------------------------------------------
 
+    /// Folder and file name of the current image (marks are keyed by both).
+    fn current_key(&self) -> Option<(PathBuf, OsString)> {
+        let p = self.current()?;
+        Some((p.parent()?.to_path_buf(), p.file_name()?.to_os_string()))
+    }
+
     pub fn current_marks(&self) -> u16 {
-        match (self.folder.as_deref(), self.current().and_then(Path::file_name)) {
-            (Some(d), Some(n)) => self.settings.marks(d, n),
-            _ => 0,
-        }
+        self.current_key().map_or(0, |(d, n)| self.settings.marks(&d, &n))
     }
 
     pub fn mark_label(&self, slot: usize) -> Option<String> {
@@ -705,27 +769,26 @@ impl App {
         if self.settings.mark_dirs[s].is_none() {
             return vec![Effect::PickMarkDir { slot, toggle: true }];
         }
-        let (Some(dir), Some(name)) = (self.folder.clone(), self.current().and_then(Path::file_name).map(OsString::from)) else {
-            return Vec::new();
-        };
-        let bits = self.settings.toggle(&dir, &name, s);
+        let Some((dir, name)) = self.current_key() else { return Vec::new() };
+        let bits = self.update_settings(|st| st.toggle(&dir, &name, s));
         let label = self.mark_label(s).unwrap_or_default();
         self.show_toast(&if bits & (1 << s) != 0 { format!("Marked for “{label}”") } else { format!("Removed from “{label}”") });
-        self.settings_changed();
         Vec::new()
     }
 
     pub fn mark_dir_picked(&mut self, slot: u8, dir: PathBuf, toggle: bool) -> Vec<Effect> {
-        self.settings.mark_dirs[usize::from(slot)] = Some(dir);
-        self.settings_changed();
+        self.update_settings(|st| st.mark_dirs[usize::from(slot)] = Some(dir));
         if toggle { self.toggle_mark(slot) } else { Vec::new() }
     }
 
     fn clear_current_marks(&mut self) {
-        let (Some(dir), Some(name)) = (self.folder.clone(), self.current().and_then(Path::file_name).map(OsString::from)) else { return };
-        if self.settings.marks(&dir, &name) != 0 {
-            self.settings.set_marks(&dir, &name, 0);
-            self.settings_changed();
+        let Some((dir, name)) = self.current_key() else { return };
+        let had = self.update_settings(|st| {
+            let had = st.marks(&dir, &name) != 0;
+            st.set_marks(&dir, &name, 0);
+            had
+        });
+        if had {
             self.show_toast("Marks removed");
         }
     }
@@ -740,6 +803,7 @@ impl App {
 
     fn send(&mut self, mode: SendMode) {
         self.dialog = None;
+        self.reload_settings();
         let dirs = self.settings.mark_dirs.clone();
         let items: Vec<_> = self.settings.marked();
         if items.is_empty() || self.busy {
@@ -820,14 +884,15 @@ impl App {
                 TaskMsg::Progress(s) => self.show_sticky(&s),
                 TaskMsg::Sent { mode, done, missing, failed } => {
                     self.busy = false;
-                    for (dir, name, bits) in &done {
-                        let left = self.settings.marks(dir, name) & !bits;
-                        self.settings.set_marks(dir, name, left);
-                    }
-                    for (dir, name) in &missing {
-                        self.settings.set_marks(dir, name, 0);
-                    }
-                    self.settings_changed();
+                    self.update_settings(|st| {
+                        for (dir, name, bits) in &done {
+                            let left = st.marks(dir, name) & !bits;
+                            st.set_marks(dir, name, left);
+                        }
+                        for (dir, name) in &missing {
+                            st.set_marks(dir, name, 0);
+                        }
+                    });
                     let verb = if mode == SendMode::Copy { "Copied" } else { "Moved" };
                     let n = done.len();
                     let files = if n == 1 { "file" } else { "files" };
@@ -851,6 +916,9 @@ impl App {
                             } else {
                                 let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                                 self.show_toast(&format!("Saved as “{name}”"));
+                                if self.selection {
+                                    self.files.insert((self.index + 1).min(self.files.len()), p.clone());
+                                }
                             }
                             fx.extend(self.rescan());
                             self.request_decodes();
@@ -864,16 +932,25 @@ impl App {
         fx
     }
 
-    fn settings_changed(&mut self) {
-        self.save_at = Some(Instant::now() + SAVE_DELAY);
+    /// Applies `f` to the settings on disk and saves them, under a session
+    /// lock, so several windows never undo each other's changes.
+    pub fn update_settings<R>(&mut self, f: impl FnOnce(&mut Settings) -> R) -> R {
+        let Some(path) = self.settings_path.clone() else { return f(&mut self.settings) };
+        let _lock = sys::NamedMutex::lock(SETTINGS_LOCK, 2000);
+        self.settings = Settings::load(&path);
+        let r = f(&mut self.settings);
+        if let Err(e) = self.settings.save(&path) {
+            self.show_toast(&format!("Could not save settings: {e}"));
+        }
+        self.dirty = true;
+        r
     }
 
-    pub fn save_settings(&mut self) {
-        self.save_at = None;
-        if let Some(p) = &self.settings_path {
-            if let Err(e) = self.settings.save(p) {
-                self.show_toast(&format!("Could not save settings: {e}"));
-            }
+    /// Picks up changes made by other windows.
+    pub fn reload_settings(&mut self) {
+        if let Some(path) = &self.settings_path {
+            self.settings = Settings::load(path);
+            self.dirty = true;
         }
     }
 
@@ -961,9 +1038,6 @@ impl App {
         if self.show_spinner() {
             self.dirty = true;
         }
-        if self.save_at.is_some_and(|t| self.now >= t) {
-            self.save_settings();
-        }
     }
 
     /// When the host should call [`tick`](Self::tick) next.
@@ -986,9 +1060,6 @@ impl App {
         }
         if self.hover.is_some() && self.now - self.hover_since < TOOLTIP_DELAY {
             wake.push(left(self.hover_since + TOOLTIP_DELAY));
-        }
-        if let Some(t) = self.save_at {
-            wake.push(left(t));
         }
         wake.into_iter().min().map(|d| d.max(Duration::from_millis(1)))
     }
@@ -1219,8 +1290,7 @@ impl App {
             Action::ZoomFit => self.zoom_fit(),
             Action::ZoomToggle => self.zoom_toggle(None),
             Action::Properties => {
-                self.settings.properties = !self.settings.properties;
-                self.settings_changed();
+                self.update_settings(|st| st.properties = !st.properties);
                 self.view = self.clamp_view(self.view);
             }
             Action::Fullscreen => return vec![Effect::Fullscreen(!self.fullscreen)],
@@ -1257,9 +1327,14 @@ impl App {
             Action::Crop(_) => {}
             Action::PickMarkDir(slot) => return vec![Effect::PickMarkDir { slot, toggle: false }],
             Action::ClearMarkDir(slot) => {
-                self.settings.mark_dirs[usize::from(slot)] = None;
-                self.settings_changed();
+                self.update_settings(|st| st.mark_dirs[usize::from(slot)] = None);
             }
+            Action::Install => self.open_dialog(Dialog::Install),
+            Action::ConfirmInstall => {
+                self.dialog = None;
+                return vec![Effect::Install];
+            }
+            Action::DefaultApps => return vec![Effect::DefaultApps],
             Action::SendCopy => self.send(SendMode::Copy),
             Action::SendMove => self.send(SendMode::Move),
         }
@@ -1332,6 +1407,7 @@ impl App {
             }
             // The default response of an alert, as in AdwAlertDialog.
             Key::Enter if self.dialog == Some(Dialog::Send) && !self.send_summary().is_empty() => self.activate(Action::SendCopy),
+            Key::Enter if self.dialog == Some(Dialog::Install) => self.activate(Action::ConfirmInstall),
             Key::Enter if ctrl && self.edit.is_some() => {
                 self.save_edit(false);
                 Vec::new()
@@ -1435,7 +1511,9 @@ impl App {
 
     pub fn window_active(&mut self, active: bool) {
         self.active = active;
-        if !active {
+        if active {
+            self.reload_settings();
+        } else {
             self.cancel_drag();
         }
         self.dirty = true;

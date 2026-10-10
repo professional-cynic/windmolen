@@ -49,6 +49,9 @@ pub enum Action {
     SendCopy,
     SendMove,
     ConfirmReplace,
+    Install,
+    ConfirmInstall,
+    DefaultApps,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

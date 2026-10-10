@@ -179,7 +179,10 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         }
 
         match app.current() {
-            Some(p) => (file_name(p), Some(format!("{} of {}", app.index + 1, app.files.len()))),
+            Some(p) => {
+                let sel = if app.selection { " selected" } else { "" };
+                (file_name(p), Some(format!("{} of {}{sel}", app.index + 1, app.files.len())))
+            }
             None => ("Het Plantsoen".to_owned(), None),
         }
     };
@@ -567,19 +570,27 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
     const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
     let can_send = !app.busy && app.settings.counts().iter().any(|&c| c > 0);
     let (anchor, items, above): (Option<Rect>, Vec<Item>, bool) = match p {
-        Popover::Main => (
-            anchors.main,
-            vec![
+        Popover::Main => {
+            let mut v = vec![
                 entry(Action::Open, "Open…", Some("Ctrl+O")),
                 Item::Separator,
                 Item::Entry { action: Action::SendMarked, label: "Send Marked Files…".into(), accel: Some("Ctrl+M"), check: None, enabled: can_send },
                 entry(Action::ManageMarks, "Manage Marks…", None),
                 Item::Separator,
-                entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")),
-                entry(Action::About, "About Het Plantsoen", None),
-            ],
-            false,
-        ),
+            ];
+            match app.installed {
+                None => v.push(entry(Action::Install, "Install…", None)),
+                Some(false) => v.push(entry(Action::Install, "Update Installation…", None)),
+                Some(true) => {}
+            }
+            if app.installed.is_some() {
+                v.push(entry(Action::DefaultApps, "Default Apps…", None));
+            }
+            v.push(Item::Separator);
+            v.push(entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")));
+            v.push(entry(Action::About, "About Het Plantsoen", None));
+            (anchors.main, v, false)
+        }
         Popover::Marks => {
             let bits = app.current_marks();
             let has = app.current().is_some();
@@ -706,7 +717,7 @@ fn dialog_frame(app: &App, ui: &mut Ui, width: f32, content_h: f32, title: Optio
 pub fn dialog_max_scroll(app: &App) -> f32 {
     let Some(d) = app.dialog else { return 0.0 };
     let (w, h) = dialog_size(app, d);
-    let header = if matches!(d, Dialog::Send | Dialog::Replace) { 0.0 } else { HEADER_H };
+    let header = if matches!(d, Dialog::Send | Dialog::Replace | Dialog::Install) { 0.0 } else { HEADER_H };
     let _ = w;
     (header + h - (app.height() - 24.0)).max(0.0)
 }
@@ -764,6 +775,11 @@ fn alert_body(app: &App, d: Dialog) -> (String, String) {
                 ("Send Marked Files?".into(), format!("{}\n\nMarks are removed once their files have been sent.", lines.join("\n")))
             }
         }
+        Dialog::Install => (
+            if app.installed == Some(false) { "Update Installation?" } else { "Install Het Plantsoen?" }.into(),
+            "It is copied to your user folder and added to the Start menu, to Open with and to the right-click menu of images. No administrator rights are needed.\n\nWindows then asks you to confirm it as your default image viewer in Settings."
+                .into(),
+        ),
         Dialog::Replace => {
             let name = app.current().map(file_name).unwrap_or_default();
             ("Replace Original?".into(), format!("“{name}” will be overwritten with the edited image. This can't be undone."))
@@ -777,7 +793,7 @@ fn dialog_size(app: &App, d: Dialog) -> (f32, f32) {
     let m = &app.r.text;
     use crate::ui::Measure;
     match d {
-        Dialog::Send | Dialog::Replace => {
+        Dialog::Send | Dialog::Replace | Dialog::Install => {
             let w = 372.0f32.min(app.width() - 24.0);
             let (head, body) = alert_body(app, d);
             let (_, hh) = m.measure(&head, TextStyle::Title2, w - 48.0, true);
@@ -802,7 +818,7 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
     let fg = t.window_fg;
     let (width, content_h) = dialog_size(app, d);
     match d {
-        Dialog::Send | Dialog::Replace => {
+        Dialog::Send | Dialog::Replace | Dialog::Install => {
             let f = dialog_frame(app, ui, width, content_h, None, true);
             let r = f.content;
             let (head, body) = alert_body(app, d);
@@ -815,6 +831,10 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
                 Dialog::Send if app.send_summary().is_empty() => vec![("Close", Action::Dismiss, Style::Normal)],
                 Dialog::Send => {
                     vec![("Cancel", Action::Dismiss, Style::Normal), ("Move", Action::SendMove, Style::Normal), ("Copy", Action::SendCopy, Style::Suggested)]
+                }
+                Dialog::Install => {
+                    let label = if app.installed == Some(false) { "Update" } else { "Install" };
+                    vec![("Cancel", Action::Dismiss, Style::Normal), (label, Action::ConfirmInstall, Style::Suggested)]
                 }
                 _ => vec![("Cancel", Action::Dismiss, Style::Normal), ("Replace", Action::ConfirmReplace, Style::Destructive)],
             };

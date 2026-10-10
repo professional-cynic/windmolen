@@ -46,6 +46,34 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 - Per-monitor DPI, fullscreen, Windows 11 snap layouts on the maximise button, keyboard
   navigation with a focus ring, and tooltips.
 
+## Installing
+
+Open the main menu › **Install…**, or run `het-plantsoen.exe --install`.
+Everything is per user, so no administrator rights are needed:
+
+- The program is copied to `%LOCALAPPDATA%\Programs\Het Plantsoen` and gets a Start menu shortcut.
+- It is registered for every format WIC can currently decode:
+  - per-format ProgIDs and **Open with** entries;
+  - a right-click **Open in Het Plantsoen** verb that accepts multiple files;
+  - Default-apps capabilities and an entry in Settings › Apps (which uninstalls it).
+- Windows doesn't let any app make itself the default. Installing opens Settings ›
+  Default apps on Het Plantsoen's page, where you confirm it.
+- Running **Install…** again from a newer build updates the installed copy, even while it is running.
+- After installing new Store codecs (HEIC, WebP, …), run **Update Installation…** so those formats are registered too.
+- Uninstalling keeps your marks and settings in `%APPDATA%`.
+
+### One window per action
+
+Opening several selected files (Enter, right-click › Open in Het Plantsoen,
+or Open with) shows them together in one window as a selection ("2 of 4
+selected"). Opening a file on its own browses its folder in a new window.
+
+Explorer starts one process per selected file. The first process accepts the
+others' files for about a second and a half after it starts, or while more keep
+arriving. Those processes hand their file over and exit. Files opened separately
+more than a moment apart get their own window. Several windows can be open at
+once; marks and settings are shared safely between them.
+
 ## Keyboard
 
 | | |
@@ -104,7 +132,12 @@ on any OS.
   This is the largest gap against the HIG. Keyboard access is complete.
 - Animated GIF/WebP show their first frame; editing them is disabled.
 - Colour is managed to sRGB, not to the monitor's own profile.
-- No clipboard, delete-to-Recycle-Bin or file associations yet.
+- No clipboard or delete-to-Recycle-Bin yet.
+- Windows 11 lists the right-click verb under **Show more options** (Shift+F10). The new
+  top-level menu only accepts apps with package identity (a signed MSIX), which this
+  deliberately avoids.
+- Two separate opens less than about 1.5 s apart are treated as one selection.
 - Tested here through unit tests and under Wine (rendering, navigation, marks,
-  send, crop and save). Wine lacks WIC rotation and JPEG metadata, so those
+  send, crop and save, install/uninstall registration, multi-file grouping).
+  Explorer itself and the Settings default-apps page can't be exercised under Wine. Wine lacks WIC rotation and JPEG metadata, so those
   paths, and the real DWM frame, still need a check on Windows.

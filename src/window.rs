@@ -17,7 +17,12 @@ use windows::core::{BOOL, HSTRING, PCWSTR, Result, w};
 
 use crate::app::{App, Cursor, Effect, Key, NcHit, WM_TASK};
 use crate::settings::Placement;
-use crate::sys;
+use crate::{install, instance, sys};
+
+/// `None`: not installed; `Some(true)`: this is the installed copy.
+fn install_state() -> Option<bool> {
+    install::installed_exe().map(|_| install::running_installed())
+}
 use crate::wic::WM_DECODED;
 
 const CLASS: PCWSTR = w!("HetPlantsoen.Window");
@@ -58,7 +63,7 @@ fn frame_thickness(hwnd: HWND) -> i32 {
     }
 }
 
-pub fn run(arg: Option<PathBuf>) -> Result<()> {
+pub fn run(args: Vec<PathBuf>) -> Result<()> {
     // SAFETY: standard window creation; the host outlives the window
     // because it is reclaimed only after the message loop has ended.
     unsafe {
@@ -124,10 +129,10 @@ pub fn run(arg: Option<PathBuf>) -> Result<()> {
         let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         let host_ref = &*host;
         host_ref.sync_size(hwnd);
-        if let Some(path) = arg {
-            let fx = host_ref.with(|a| a.open_path(&path)).unwrap_or_default();
-            host_ref.run_effects(hwnd, fx);
-        }
+        host_ref.with(|a| a.installed = install_state());
+        let fx = host_ref.with(|a| a.open_launch(args)).unwrap_or_default();
+        host_ref.run_effects(hwnd, fx);
+        instance::set_target(hwnd);
         let _ = UpdateWindow(hwnd);
         set_attr(hwnd, DWMWA_CLOAK, &BOOL(0));
 
@@ -271,6 +276,21 @@ impl Host {
                     Effect::Title(t) => {
                         let _ = SetWindowTextW(hwnd, &HSTRING::from(t));
                     }
+                    Effect::Install => {
+                        let Some(exts) = self.with(|a| a.exts.clone()) else { continue };
+                        let result = install::install(&exts);
+                        self.with(|a| {
+                            a.installed = install_state();
+                            match &result {
+                                Ok(_) => a.show_toast("Installed — choose Het Plantsoen as the default in Settings"),
+                                Err(e) => a.show_toast(&format!("Could not install: {e}")),
+                            }
+                        });
+                        if result.is_ok() {
+                            install::open_default_apps();
+                        }
+                    }
+                    Effect::DefaultApps => install::open_default_apps(),
                 }
             }
         }
@@ -318,8 +338,7 @@ impl Host {
         let r = wp.rcNormalPosition;
         let maximised = wp.showCmd == SW_SHOWMAXIMIZED.0 as u32 || (wp.flags.0 & WPF_RESTORETOMAXIMIZED.0) != 0;
         self.with(|a| {
-            a.settings.placement = Some(Placement { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, maximised });
-            a.save_settings();
+            a.update_settings(|st| st.placement = Some(Placement { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top, maximised }));
         });
     }
 
@@ -565,6 +584,12 @@ impl Host {
                 }
                 WM_TASK => {
                     fx = self.with(App::on_task).unwrap_or_default();
+                }
+                instance::WM_GATHERED => {
+                    let more = instance::take();
+                    if !more.is_empty() {
+                        fx = self.with(|a| a.add_launch(more)).unwrap_or_default();
+                    }
                 }
                 WM_CLOSE => {
                     self.save_placement(hwnd);
