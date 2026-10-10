@@ -6,7 +6,7 @@
 
 A lean, fast photo viewer for Windows, designed after the GNOME HIG and
 libadwaita (colours, type scale, header bar, status pages, boxed lists,
-popovers, dialogs, toasts). `prototype.html` is the original HTML prototype.
+popovers, dialogs, toasts).
 
 - **One dependency:** Microsoft's own [`windows`](https://github.com/microsoft/windows-rs)
   crate (plus its `windows-numerics` companion). The UI toolkit, layout, icons and
