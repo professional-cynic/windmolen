@@ -1601,9 +1601,19 @@ impl App {
             }
             Action::Open => return vec![Effect::OpenDialog { only: false }],
             Action::OpenOnly => return vec![Effect::OpenDialog { only: true }],
-            Action::BrowseFolder => {
+            Action::ShowFolder => {
                 if let (true, Some(p)) = (self.selection, self.current().map(Path::to_path_buf)) {
-                    return self.open_in_folder(&p);
+                    let fx = self.open_in_folder(&p);
+                    // The image on screen stays: say what changed.
+                    if !self.selection {
+                        let name = self.folder.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let text = match self.files.len() {
+                            1 => format!("No other images in “{name}”"),
+                            n => format!("Showing all {n} images in “{name}”"),
+                        };
+                        self.show_toast(&text);
+                    }
+                    return fx;
                 }
             }
             Action::Prev => return self.step(-1),
@@ -1760,7 +1770,7 @@ impl App {
             Key::Letter(c) if ctrl => match (c, shift) {
                 ('o', false) if self.edit.is_none() => self.activate(Action::Open),
                 ('o', true) if self.edit.is_none() => self.activate(Action::OpenOnly),
-                ('b', _) if self.edit.is_none() => self.activate(Action::BrowseFolder),
+                ('b', _) if self.edit.is_none() => self.activate(Action::ShowFolder),
                 ('s', _) if self.edit.is_some() => self.activate(Action::EditSave),
                 ('r', false) => self.rotate_shortcut(true),
                 ('r', true) => self.rotate_shortcut(false),

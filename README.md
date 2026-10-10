@@ -29,8 +29,8 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 ## Features
 
 - Open a file (or drop it on the window) and browse its folder in Explorer's natural order,
-  or open just that image (**Open Image Only…**) and widen it to its folder later with
-  **Browse Folder**.
+  or open just that image (**Open Image Only…**) and add the rest of its folder later with
+  **Show All Images in Folder**.
 - Zoom with the mouse wheel or touchpad pinch, anchored at the cursor. Animated
   zoom; double-click toggles best fit / 100 %. Drag to pan. Neighbouring images are pre-decoded at screen size; only the image
   on screen is kept at full size, for zooming, and it is drawn from a screen-sized
@@ -70,8 +70,8 @@ Everything is per user, so no administrator rights are needed:
 
 - Double-clicking an image, or **Open with › Windmolen**, browses its folder, as
   Microsoft Photos does. (Windows runs the same command for both, so they can't differ.)
-- Right-click › **Open in Windmolen** shows just the chosen files. **Browse Folder**
-  (Ctrl+B) loads the rest of the folder later.
+- Right-click › **Open in Windmolen** shows just the chosen files. **Show All Images
+  in Folder** (Ctrl+B) adds the rest of the folder later.
 - In the app, **Open…** (Ctrl+O) browses the folder of the image you choose, and
   **Open Image Only…** (Ctrl+Shift+O) doesn't. Choosing several files shows just those.
 
@@ -150,7 +150,7 @@ MSVC (manifest and Explorer icon included), attests the build and publishes
 
 | | |
 |---|---|
-| Open / open image only / browse its folder | Ctrl+O / Ctrl+Shift+O / Ctrl+B |
+| Open / open image only / show all images in folder | Ctrl+O / Ctrl+Shift+O / Ctrl+B |
 | Next / previous | → ← · D A · Page Down / Up · mouse back/forward |
 | First / last | Home / End |
 | Zoom in / out | + − · wheel |

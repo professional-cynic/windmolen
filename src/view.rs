@@ -260,14 +260,7 @@ fn canvas(app: &App, ui: &mut Ui) {
             ui.alpha = 1.0;
         }
     } else if app.files.is_empty() {
-        status_page(
-            ui,
-            vp,
-            Icon::Image,
-            "No Image Open",
-            "Open an image or drag one onto this window to start browsing its folder",
-            Some(("Open Image…", Action::Open)),
-        );
+        status_page(ui, vp, Icon::Image, "No Image Open", "Drag and drop an image here", Some(("Open Image…", Action::Open)));
     } else if app.show_spinner() {
         let (cx, cy) = (vp.cx(), vp.cy());
         let r = 16.0;
@@ -641,8 +634,8 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
                     enabled: app.edit.is_none(),
                 },
                 Item::Entry {
-                    action: Action::BrowseFolder,
-                    label: "Browse Folder".into(),
+                    action: Action::ShowFolder,
+                    label: "Show All Images in Folder".into(),
                     accel: Some("Ctrl+B"),
                     check: None,
                     enabled: app.selection && app.current().is_some() && app.edit.is_none(),
@@ -805,7 +798,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Open", "Ctrl+O"),
             ("Open image only", "Ctrl+Shift+O"),
-            ("Browse its folder", "Ctrl+B"),
+            ("Show all images in folder", "Ctrl+B"),
             ("Main menu", "F10"),
             ("Preferences", "Ctrl+,"),
             ("Keyboard shortcuts", "Ctrl+?"),

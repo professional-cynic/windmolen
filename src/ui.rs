@@ -15,8 +15,8 @@ pub enum Action {
     Open,
     /// Opens the chosen images without the rest of their folder.
     OpenOnly,
-    /// Widens a selection to the current image's folder.
-    BrowseFolder,
+    /// Adds the other images in the current image's folder.
+    ShowFolder,
     Prev,
     Next,
     ZoomIn,
