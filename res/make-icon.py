@@ -28,9 +28,11 @@ HILL, HILL_LIGHT = hexc(0x26A269), hexc(0x33D17A)
 # Brown 3 and 4: the lit and shaded halves of the body; brown 5 for wood.
 TOWER, TOWER_SHADE = hexc(0x986A44), hexc(0x865E3C)
 CAP, DOOR, STOCK = hexc(0x63452C), hexc(0x63452C), hexc(0x4A3320)
+AXLE = hexc(0xC01C28)
 SAIL = hexc(0xFFFFFF)
 
-HUB = (128.0, 104.0)
+# The axle, at the centre of the cap.
+HUB = (128.0, 106.0)
 SAIL_ANGLE = math.radians(45)
 
 
@@ -90,7 +92,7 @@ def colour(x, y):
     if in_poly(x, y, CAP_PTS):
         c = CAP
     if in_circle(x, y, HUB[0], HUB[1], 8):
-        c = STOCK
+        c = AXLE
     return c
 
 
