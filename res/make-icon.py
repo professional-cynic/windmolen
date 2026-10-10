@@ -85,12 +85,13 @@ def colour(x, y):
         c = TOWER_SHADE if in_poly(x, y, TOWER_LIT) else TOWER
     if in_poly(x, y, DOOR_PTS) or in_poly(x, y, GALLERY_PTS):
         c = DOOR
+    if in_poly(x, y, CAP_PTS):
+        c = CAP
+    # The sails turn in front of the cap and body.
     if any(in_poly(x, y, s) for s in SAILS):
         c = SAIL
     if any(in_poly(x, y, s) for s in LATTICE + STOCKS):
         c = STOCK
-    if in_poly(x, y, CAP_PTS):
-        c = CAP
     if in_circle(x, y, HUB[0], HUB[1], 8):
         c = AXLE
     return c
