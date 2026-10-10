@@ -138,20 +138,6 @@ offline code signing (Authenticode), which needs a certificate.
 - A settings file that cannot be read is never saved over, so a passing read error
   cannot wipe your marks.
 
-## Releasing
-
-1. Bump `version` in `Cargo.toml` (`MAJOR.MINOR.PATCH`), commit and push.
-2. Either `git tag v0.2.0 && git push origin v0.2.0`, or open the **Release** workflow
-   in the Actions tab and press **Run workflow** on `main`, which creates the tag.
-
-`.github/workflows/release.yml` checks that the tag matches `Cargo.toml` (or, when
-started by hand, that the version is not tagged yet), runs the tests, builds with
-MSVC (manifest and Explorer icon included), builds the installer with Inno Setup
-(`installer/build.ps1`, a pinned and checksum-verified Inno Setup), attests it and
-publishes `Windmolen-Setup.exe` and `latest.txt` as a GitHub Release.
-`ci.yml` runs Clippy and the tests on every push to `main`, builds the installer,
-and installs, updates and uninstalls it on the runner (`installer/test.ps1`).
-
 ## Keyboard
 
 | | |
