@@ -90,11 +90,13 @@ most once a day. **Check for Updates…** checks immediately. Each check:
 
 Without a restart, the new version is used the next time the app starts. This
 works for installed and portable copies alike. Nothing is sent beyond a normal
-download request.
+download request. The requests carry no login, so updates only work while the
+repository is public.
 
 The checksum guards against corrupted or truncated downloads; authenticity comes
-from HTTPS to github.com and the release being yours. Every release also gets a
-signed build-provenance attestation, which you can check with
+from HTTPS to github.com and the release being yours. While the repository is
+public, every release also gets a signed build-provenance attestation, which you
+can check with
 `gh attestation verify windmolen.exe -R professional-cynic/windmolen`.
 For protection even against a compromised GitHub account, releases would need
 offline code signing (Authenticode), which needs a certificate.
