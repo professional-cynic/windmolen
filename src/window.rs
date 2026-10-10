@@ -2,7 +2,7 @@
 //! borders, snap layouts and system menu), DPI handling and input routing.
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
@@ -72,7 +72,7 @@ fn monitor_edge(hwnd: HWND) -> u32 {
     (r.right - r.left).max(r.bottom - r.top).max(1) as u32
 }
 
-pub fn run(args: Vec<PathBuf>) -> Result<()> {
+pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
     // SAFETY: standard window creation; the host outlives the window
     // because it is reclaimed only after the message loop has ended.
     unsafe {
@@ -144,7 +144,7 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
         let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         let host_ref = &*host;
         host_ref.sync_size(hwnd);
-        let fx = host_ref.with(|a| a.open_launch(args)).unwrap_or_default();
+        let fx = host_ref.with(|a| a.open_launch(args, only)).unwrap_or_default();
         host_ref.run_effects(hwnd, fx);
         let _ = UpdateWindow(hwnd);
         set_attr(hwnd, DWMWA_CLOAK, &BOOL(0));
@@ -198,7 +198,7 @@ impl Host {
 
     /// Window icons for the taskbar and Alt+Tab, at the current DPI.
     fn set_icons(&self, hwnd: HWND) {
-        static PNG: &[u8] = include_bytes!("../res/windmolen.png");
+        let png = crate::render::APP_ICON_PNG;
         // SAFETY: PNG data in icon-resource form; handles are freed later.
         unsafe {
             let dpi = GetDpiForWindow(hwnd);
@@ -206,7 +206,7 @@ impl Host {
             let mut new = [None, None];
             for (i, (kind, metric)) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)].into_iter().enumerate() {
                 let size = GetSystemMetricsForDpi(metric, dpi);
-                if let Ok(icon) = CreateIconFromResourceEx(PNG, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR) {
+                if let Ok(icon) = CreateIconFromResourceEx(png, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR) {
                     SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
                     new[i] = Some(icon);
                 }
@@ -273,14 +273,19 @@ impl Host {
             // the app is not borrowed so re-entrant messages are handled.
             unsafe {
                 match e {
-                    Effect::OpenDialog => {
-                        let Some((exts, start)) = self.with(|a| (a.exts.clone(), a.folder.clone())) else { continue };
-                        match sys::open_file_dialog(hwnd, &exts, start.as_deref()) {
-                            Ok(Some(p)) => {
-                                let more = self.with(|a| a.open_path(&p)).unwrap_or_default();
+                    Effect::OpenDialog { only } => {
+                        let Some((exts, start)) = self.with(|a| {
+                            let start = a.folder.clone().or_else(|| a.current().and_then(Path::parent).map(Path::to_path_buf));
+                            (a.exts.clone(), start)
+                        }) else {
+                            continue;
+                        };
+                        let title = if only { "Open Image Only" } else { "Open" };
+                        match sys::open_file_dialog(hwnd, title, &exts, start.as_deref()) {
+                            Ok(files) => {
+                                let more = self.with(|a| a.open_files(files, only)).unwrap_or_default();
                                 self.run_effects(hwnd, more);
                             }
-                            Ok(None) => {}
                             Err(err) => {
                                 self.with(|a| a.show_toast(&format!("Could not open the file dialog: {}", err.message())));
                             }
@@ -564,6 +569,7 @@ impl Host {
                             _ if vk == VK_OEM_PLUS || vk == VK_ADD => Some(Key::Letter('+')),
                             _ if vk == VK_OEM_MINUS || vk == VK_SUBTRACT => Some(Key::Letter('-')),
                             _ if vk == VK_OEM_2 => Some(Key::Letter(if shift { '?' } else { '/' })),
+                            _ if vk == VK_OEM_COMMA => Some(Key::Letter(',')),
                             _ => None,
                         },
                         _ => None,

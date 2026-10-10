@@ -116,8 +116,8 @@ fn show(d: &IFileDialog, owner: HWND) -> Result<bool> {
     }
 }
 
-/// Native "Open" dialog filtered to `extensions`.
-pub fn open_file_dialog(owner: HWND, extensions: &[String], start: Option<&Path>) -> Result<Option<PathBuf>> {
+/// Native "Open" dialog filtered to `extensions`; several files can be chosen.
+pub fn open_file_dialog(owner: HWND, title: &str, extensions: &[String], start: Option<&Path>) -> Result<Vec<PathBuf>> {
     let mut spec = extensions.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(";");
     if spec.is_empty() {
         spec = "*.*".into();
@@ -131,10 +131,20 @@ pub fn open_file_dialog(owner: HWND, extensions: &[String], start: Option<&Path>
             COMDLG_FILTERSPEC { pszName: PCWSTR(all.as_ptr()), pszSpec: PCWSTR(any.as_ptr()) },
         ];
         d.SetFileTypes(&filters)?;
-        d.SetOptions(d.GetOptions()? | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)?;
+        d.SetOptions(d.GetOptions()? | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT)?;
+        d.SetTitle(&HSTRING::from(title))?;
         set_folder(&d, start);
-        let d: IFileDialog = windows::core::Interface::cast(&d)?;
-        Ok(if show(&d, owner)? { dialog_result(&d) } else { None })
+        if !show(&windows::core::Interface::cast(&d)?, owner)? {
+            return Ok(Vec::new());
+        }
+        let items = d.GetResults()?;
+        let mut paths = Vec::new();
+        for i in 0..items.GetCount()? {
+            if let Some(p) = items.GetItemAt(i).ok().and_then(|item| take_pwstr(item.GetDisplayName(SIGDN_FILESYSPATH).ok()?)) {
+                paths.push(PathBuf::from(p));
+            }
+        }
+        Ok(paths)
     }
 }
 

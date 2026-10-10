@@ -4,7 +4,7 @@
 use crate::edit::{Aspect, Handle};
 use crate::geom::{Affine, Rect};
 use crate::icons::Icon;
-use crate::theme::{Color, DISABLED_OPACITY, Theme};
+use crate::theme::{Color, DIM_OPACITY, DISABLED_OPACITY, STRONG_DISABLED_OPACITY, Theme};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -13,6 +13,10 @@ pub enum Action {
     /// Closes the open popover or dialog.
     Dismiss,
     Open,
+    /// Opens the chosen images without the rest of their folder.
+    OpenOnly,
+    /// Widens a selection to the current image's folder.
+    BrowseFolder,
     Prev,
     Next,
     ZoomIn,
@@ -27,6 +31,7 @@ pub enum Action {
     ToggleMark(u8),
     SendMarked,
     ManageMarks,
+    Preferences,
     Shortcuts,
     About,
     Minimize,
@@ -50,13 +55,13 @@ pub enum Action {
     SendMove,
     ConfirmReplace,
     Install,
-    ConfirmInstall,
     DefaultApps,
     CheckUpdates,
     ToggleAutoUpdate,
     Restart,
-    OpenProfile,
     OpenProject,
+    ReportIssue,
+    CloseToast,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -66,7 +71,6 @@ pub enum TextStyle {
     Caption,
     Title1,
     Title2,
-    Numeric,
 }
 
 impl TextStyle {
@@ -79,7 +83,6 @@ impl TextStyle {
             Self::Caption => (BASE * 0.82, 400),
             Self::Title1 => (BASE * 1.81, 800),
             Self::Title2 => (BASE * 1.36, 800),
-            Self::Numeric => (BASE, 600),
         }
     }
 }
@@ -132,6 +135,13 @@ pub enum Cmd {
         /// From its screen-sized preview rather than its full bitmap.
         preview: bool,
     },
+    /// A filled polygon (popover arrows).
+    Polygon {
+        points: Vec<(f32, f32)>,
+        c: Color,
+    },
+    /// The application icon.
+    AppIcon(Rect),
     Arc {
         cx: f32,
         cy: f32,
@@ -174,6 +184,27 @@ pub enum Style {
     Control,
 }
 
+/// One CSS `box-shadow` in `rgb(0 0 6 / a)`: y offset, blur radius, spread.
+#[derive(Clone, Copy)]
+pub struct Shadow {
+    y: f32,
+    blur: f32,
+    spread: f32,
+    a: f32,
+}
+
+const fn shadow(y: f32, blur: f32, spread: f32, a: f32) -> Shadow {
+    Shadow { y, blur, spread, a }
+}
+
+/// `.card` and `.boxed-list`.
+pub const CARD_SHADOW: &[Shadow] = &[shadow(0.0, 0.0, 1.0, 0.03), shadow(1.0, 3.0, 1.0, 0.07), shadow(2.0, 6.0, 2.0, 0.03)];
+pub const POPOVER_SHADOW: &[Shadow] = &[shadow(0.0, 0.0, 1.0, 0.05), shadow(1.0, 5.0, 1.0, 0.09), shadow(2.0, 14.0, 3.0, 0.05)];
+/// The sheet of a floating `AdwDialog`.
+pub const DIALOG_SHADOW: &[Shadow] = &[shadow(0.0, 14.0, 2.0, 0.03), shadow(0.0, 5.0, 2.0, 0.10), shadow(0.0, 0.0, 1.0, 0.05)];
+pub const TOAST_SHADOW: &[Shadow] = &[shadow(1.0, 3.0, 1.0, 0.07), shadow(2.0, 6.0, 2.0, 0.03)];
+const SWITCH_KNOB_SHADOW: &[Shadow] = &[shadow(2.0, 4.0, 0.0, 0.2)];
+
 pub enum Content<'s> {
     Icon(Icon),
     Label(&'s str),
@@ -190,11 +221,23 @@ pub struct Ui<'a> {
     pub focus: Option<Action>,
     /// Opacity applied to everything emitted (for fading overlays).
     pub alpha: f32,
+    /// Corner radius of buttons that aren't round.
+    pub radius: f32,
 }
 
 impl<'a> Ui<'a> {
     pub fn new(t: &'a Theme, m: &'a dyn Measure) -> Self {
-        Self { cmds: Vec::with_capacity(256), widgets: Vec::with_capacity(64), t, m, hover: None, pressed: None, focus: None, alpha: 1.0 }
+        Self {
+            cmds: Vec::with_capacity(256),
+            widgets: Vec::with_capacity(64),
+            t,
+            m,
+            hover: None,
+            pressed: None,
+            focus: None,
+            alpha: 1.0,
+            radius: 9.0,
+        }
     }
 
     pub fn fill(&mut self, r: Rect, radius: f32, c: Color) {
@@ -253,14 +296,19 @@ impl<'a> Ui<'a> {
         self.widget(size, backdrop, None);
     }
 
-    /// A soft drop shadow made of stacked translucent outlines.
-    pub fn shadow(&mut self, r: Rect, radius: f32, strength: f32) {
-        const STEPS: usize = 8;
-        for i in (1..=STEPS).rev() {
-            let d = i as f32 * 1.5;
-            let a = strength * 0.035 * (1.0 - i as f32 / (STEPS as f32 + 1.0));
-            let s = Rect::new(r.x - d, r.y - d + d * 0.5, r.w + 2.0 * d, r.h + 2.0 * d);
-            self.fill(s, radius + d, Color::BLACK.alpha(a));
+    /// CSS `box-shadow`s behind `r`, which must then be painted opaque. A
+    /// blurred edge is approximated by stacked fills ramping linearly from
+    /// `spread + blur` outside the box to `spread - blur` inside it.
+    pub fn box_shadow(&mut self, r: Rect, radius: f32, shadows: &[Shadow]) {
+        for s in shadows {
+            let n = (s.blur.ceil() as usize).clamp(1, 8);
+            for i in 0..n {
+                let e = s.spread + s.blur * (1.0 - (2 * i + 1) as f32 / n as f32);
+                let b = Rect::new(r.x - e, r.y + s.y - e, r.w + 2.0 * e, r.h + 2.0 * e);
+                if b.w > 0.0 && b.h > 0.0 {
+                    self.fill(b, (radius + e).max(0.0), Color::rgba(0, 0, 6, s.a / n as f32));
+                }
+            }
         }
     }
 
@@ -284,15 +332,20 @@ impl<'a> Ui<'a> {
     ) {
         let t = self.t;
         let (hover, active) = if enabled { self.state(action) } else { (false, false) };
-        let k = if enabled { 1.0 } else { DISABLED_OPACITY };
+        let k = match (enabled, style) {
+            (true, _) => 1.0,
+            (false, Style::Flat) if !checked => STRONG_DISABLED_OPACITY,
+            _ => DISABLED_OPACITY,
+        };
         let radius = match style {
             Style::Osd | Style::Control | Style::Pill => r.h.min(r.w) / 2.0,
-            _ => 6.0_f32.min(r.h / 2.0),
+            _ => self.radius.min(r.h / 2.0),
         };
 
         let (bg, fg) = match style {
             Style::Flat => {
                 let a = match (active, checked, hover) {
+                    (true, true, _) => 0.19,
                     (true, _, _) => 0.16,
                     (_, true, true) => 0.13,
                     (_, true, false) => 0.10,
@@ -311,22 +364,32 @@ impl<'a> Ui<'a> {
                 };
                 (fg.alpha(a), fg)
             }
-            Style::Suggested | Style::Pill | Style::Destructive => {
-                let base = if style == Style::Destructive { t.destructive_bg } else { t.accent_bg };
+            Style::Suggested | Style::Pill => {
                 let bg = match (active, hover) {
-                    (true, _) => base.mix(Color::BLACK, 0.2),
-                    (_, true) => base.mix(Color::WHITE, 0.1),
-                    _ => base,
+                    (true, _) => t.accent_bg.mix(Color::rgb(0, 0, 6), 0.2),
+                    (_, true) => t.accent_bg.mix(t.accent_fg, 0.1),
+                    _ => t.accent_bg,
                 };
                 (bg, t.accent_fg)
             }
-            Style::Osd => {
-                let bg = match (active, hover) {
-                    (true, _) => t.osd_bg.mix(Color::WHITE, 0.2),
-                    (_, true) => t.osd_bg.mix(Color::WHITE, 0.1),
-                    _ => t.osd_bg,
+            // Red text on a red tint, not a red fill.
+            Style::Destructive => {
+                let a = match (active, hover) {
+                    (true, _) => 0.35,
+                    (_, true) => 0.2,
+                    _ => 0.15,
                 };
-                (bg, t.osd_fg)
+                (t.destructive.alpha(a), t.destructive)
+            }
+            // Black at 65 %, lightened by the label colour when pointed at.
+            Style::Osd => {
+                let lift = match (active, hover) {
+                    (true, _) => 0.25,
+                    (_, true) => 0.15,
+                    _ => 0.0,
+                };
+                let fg = if active || hover { Color::WHITE } else { t.osd_fg };
+                (Color { a: 0.65, ..Color::BLACK.mix(fg, lift) }, fg)
             }
             Style::Control => (Color::TRANSPARENT, fg),
         };
@@ -348,15 +411,13 @@ impl<'a> Ui<'a> {
         let fg = fg.alpha(k);
         match content {
             Content::Icon(icon) => self.icon(icon, r.centred(16.0, 16.0).round(), fg),
-            Content::Label(s) => {
-                let style = if matches!(style, Style::Flat | Style::Normal | Style::Osd) { TextStyle::Body } else { TextStyle::Heading };
-                self.text(r, s, style, fg, Align::Centre)
-            }
+            // Button labels are bold in libadwaita.
+            Content::Label(s) => self.text(r, s, TextStyle::Heading, fg, Align::Centre),
             Content::Dropdown(s) => {
-                let tw = self.text_width(s, TextStyle::Body);
+                let tw = self.text_width(s, TextStyle::Heading);
                 let x = r.cx() - (tw + 6.0 + 16.0) / 2.0;
-                self.text(Rect::new(x, r.y, tw + 1.0, r.h), s, TextStyle::Body, fg, Align::Start);
-                self.icon(Icon::PanDown, Rect::new(x + tw + 6.0, r.cy() - 8.0, 16.0, 16.0), fg.alpha(0.8));
+                self.text(Rect::new(x, r.y, tw + 1.0, r.h), s, TextStyle::Heading, fg, Align::Start);
+                self.icon(Icon::PanDown, Rect::new(x + tw + 6.0, r.cy() - 8.0, 16.0, 16.0), fg);
             }
         }
 
@@ -372,22 +433,53 @@ impl<'a> Ui<'a> {
         let (hover, active) = if enabled { self.state(action) } else { (false, false) };
         let k = if enabled { 1.0 } else { DISABLED_OPACITY };
         if hover || active || self.focus == Some(action) {
-            self.fill(r, 6.0, fg.alpha(if active { 0.16 } else { 0.1 }));
+            self.fill(r, 9.0, fg.alpha(if active { 0.19 } else { 0.1 }));
         }
         let mut x = r.x + 12.0;
         if let Some(on) = check {
             if on {
-                self.icon(Icon::Check, Rect::new(x, r.cy() - 8.0, 16.0, 16.0), fg.alpha(k));
+                self.icon(Icon::Check, Rect::new(x - 2.0, r.cy() - 8.0, 16.0, 16.0), fg.alpha(k));
             }
-            x += 24.0;
+            x += 20.0;
         }
         let mut right = r.right() - 12.0;
         if let Some(a) = accel {
             let w = self.text_width(a, TextStyle::Body);
-            self.text(Rect::new(right - w, r.y, w + 1.0, r.h), a, TextStyle::Body, fg.alpha(0.55 * k), Align::End);
-            right -= w + 24.0;
+            self.text(Rect::new(right - w, r.y, w + 1.0, r.h), a, TextStyle::Body, fg.alpha(DIM_OPACITY * k), Align::End);
+            right -= w + 12.0;
         }
         self.text(Rect::new(x, r.y, (right - x).max(0.0), r.h), label, TextStyle::Body, fg.alpha(k), Align::Start);
         self.widgets.push(Widget { rect: r, action, tooltip: None, enabled, focusable: true });
+    }
+
+    /// A `GtkSwitch`, 46 × 26, its knob sliding to the end when on. Rows
+    /// that hold one register their own, larger hit area for `action`.
+    pub fn switch(&mut self, x: f32, y: f32, action: Action, on: bool, fg: Color) {
+        let t = self.t;
+        let (hover, active) = self.state(action);
+        let r = Rect::new(x, y, 46.0, 26.0);
+        let track = if on {
+            match (active, hover) {
+                (true, _) => t.accent_bg.mix(Color::rgb(0, 0, 6), 0.2),
+                (_, true) => t.accent_bg.mix(t.accent_fg, 0.1),
+                _ => t.accent_bg,
+            }
+        } else {
+            fg.alpha(if active {
+                0.25
+            } else if hover {
+                0.2
+            } else {
+                0.15
+            })
+        };
+        self.fill(r, 13.0, track);
+        let knob = Rect::new(if on { r.right() - 23.0 } else { r.x + 3.0 }, r.y + 3.0, 20.0, 20.0);
+        self.box_shadow(knob, 10.0, SWITCH_KNOB_SHADOW);
+        let colour = if on || hover || active { Color::WHITE } else { Color::WHITE.mix(t.view_bg, 0.2) };
+        self.fill(knob, 10.0, colour);
+        if self.focus == Some(action) {
+            self.stroke(r.inset(-2.0), 15.0, t.accent.alpha(0.5), 2.0);
+        }
     }
 }

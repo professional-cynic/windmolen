@@ -28,7 +28,9 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 
 ## Features
 
-- Open a file (or drop it on the window) and browse its folder in Explorer's natural order.
+- Open a file (or drop it on the window) and browse its folder in Explorer's natural order,
+  or open just that image (**Open Image Only…**) and widen it to its folder later with
+  **Browse Folder**.
 - Zoom with the mouse wheel or touchpad pinch, anchored at the cursor. Animated
   zoom; double-click toggles best fit / 100 %. Drag to pan. Neighbouring images are pre-decoded at screen size; only the image
   on screen is kept at full size, for zooming, and it is drawn from a screen-sized
@@ -50,25 +52,34 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 
 ## Installing
 
-Open the main menu › **Install…**, or run `windmolen.exe --install`.
+Open the main menu › **Preferences** › **Install**, or run `windmolen.exe --install`.
 Everything is per user, so no administrator rights are needed:
 
 - The program is copied to `%LOCALAPPDATA%\Programs\Windmolen` and gets a Start menu shortcut.
 - It is registered for every format WIC can currently decode:
   - per-format ProgIDs and **Open with** entries;
-  - a right-click **Open in Windmolen** verb that accepts multiple files;
+  - a right-click **Open in Windmolen** verb that shows just the chosen files, not their folder;
   - Default-apps capabilities and an entry in Settings › Apps (which uninstalls it).
 - Windows doesn't let any app make itself the default. Installing opens Settings ›
   Default apps on Windmolen's page, where you confirm it.
-- Running **Install…** again from a newer build updates the installed copy, even while it is running.
-- After installing new Store codecs (HEIC, WebP, …), run **Update Installation…** so those formats are registered too.
+- Opening a newer build shows **Update** in Preferences instead; it updates the installed copy, even while it is running.
+- After installing new Store codecs (HEIC, WebP, …), press **Register** in Preferences (from the installed copy) so those formats are registered too.
 - Uninstalling keeps your marks and settings in `%APPDATA%`.
+
+### What opens
+
+- Double-clicking an image, or **Open with › Windmolen**, browses its folder, as
+  Microsoft Photos does. (Windows runs the same command for both, so they can't differ.)
+- Right-click › **Open in Windmolen** shows just the chosen files. **Browse Folder**
+  (Ctrl+B) loads the rest of the folder later.
+- In the app, **Open…** (Ctrl+O) browses the folder of the image you choose, and
+  **Open Image Only…** (Ctrl+Shift+O) doesn't. Choosing several files shows just those.
 
 ### One window per action
 
 Opening several selected files (Enter, right-click › Open in Windmolen,
 or Open with) shows them together in one window as a selection ("2 of 4
-selected"). Opening a file on its own browses its folder in a new window.
+selected"). Each separate open gets a new window.
 
 Explorer starts one process per selected file. The first process accepts the
 others' files for about a second and a half after it starts, or while more keep
@@ -78,8 +89,8 @@ once; marks and settings are shared safely between them.
 
 ## Updates
 
-With **Automatic Updates** on (main menu; on by default), the app checks GitHub at
-most once a day. **Check for Updates…** checks immediately. Each check:
+With **Automatic Updates** on (Preferences; on by default), the app checks GitHub at
+most once a day. **Check Now** checks immediately. Each check:
 
 1. Reads the latest release's `latest.txt` from `github.com` over HTTPS, using
    Windows' own WinHTTP and TLS stack.
@@ -139,7 +150,7 @@ MSVC (manifest and Explorer icon included), attests the build and publishes
 
 | | |
 |---|---|
-| Open | Ctrl+O |
+| Open / open image only / browse its folder | Ctrl+O / Ctrl+Shift+O / Ctrl+B |
 | Next / previous | → ← · D A · Page Down / Up · mouse back/forward |
 | First / last | Home / End |
 | Zoom in / out | + − · wheel |
@@ -149,7 +160,7 @@ MSVC (manifest and Explorer icon included), attests the build and publishes
 | Edit · rotate · flip | E · R, Shift+R · H, V (in edit) |
 | Save copy / cancel | Ctrl+S / Esc |
 | Properties · fullscreen · menu | F9 or I · F11 · F10 |
-| Shortcuts / quit | Ctrl+? / Ctrl+Q |
+| Preferences / shortcuts / quit | Ctrl+, / Ctrl+? / Ctrl+Q |
 
 ## Building
 

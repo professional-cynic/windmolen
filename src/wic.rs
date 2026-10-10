@@ -355,6 +355,25 @@ pub fn decode(f: &IWICImagingFactory, path: &Path, max_edge: u32) -> std::result
     }
 }
 
+/// Decodes an image held in memory (an embedded resource) to
+/// premultiplied BGRA: (width, height, pixels).
+pub fn decode_bytes(f: &IWICImagingFactory, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    // SAFETY: COM calls on valid objects; `bytes` outlives the decoder,
+    // and the pixel buffer is sized from the reported dimensions.
+    unsafe {
+        let stream = f.CreateStream()?;
+        stream.InitializeFromMemory(bytes)?;
+        let dec = f.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
+        let conv = f.CreateFormatConverter()?;
+        conv.Initialize(&dec.GetFrame(0)?, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
+        let (mut w, mut h) = (0, 0);
+        conv.GetSize(&mut w, &mut h)?;
+        let mut pixels = vec![0; w as usize * h as usize * 4];
+        conv.CopyPixels(std::ptr::null(), w * 4, &mut pixels)?;
+        Ok((w, h, pixels))
+    }
+}
+
 /// A short, human explanation of common WIC failures.
 pub fn describe(e: &windows::core::Error) -> String {
     match e.code() {

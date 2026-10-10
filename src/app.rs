@@ -43,7 +43,10 @@ const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\Windmolen
 
 /// Work the host must do after releasing the app.
 pub enum Effect {
-    OpenDialog,
+    /// The Open dialog; `only` shows the chosen files without their folder.
+    OpenDialog {
+        only: bool,
+    },
     PickMarkDir {
         slot: u8,
         toggle: bool,
@@ -117,12 +120,12 @@ pub enum Popover {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dialog {
+    Preferences,
     Shortcuts,
     About,
     ManageMarks,
     Send,
     Replace,
-    Install,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -219,6 +222,8 @@ pub struct App {
     pub selection: bool,
     /// Files this window was launched with (grows while gathering).
     launch: Vec<PathBuf>,
+    /// Launched to show only those files (Explorer's right-click verb).
+    launch_only: bool,
     pub files: Vec<PathBuf>,
     pub index: usize,
     pub cache: HashMap<PathBuf, Slot>,
@@ -291,6 +296,7 @@ impl App {
             folder: None,
             selection: false,
             launch: Vec::new(),
+            launch_only: false,
             files: Vec::new(),
             index: 0,
             cache: HashMap::new(),
@@ -488,8 +494,9 @@ impl App {
 
     /// Opens what the window was started with: one file browses its
     /// folder, several files are browsed on their own.
-    pub fn open_launch(&mut self, paths: Vec<PathBuf>) -> Vec<Effect> {
+    pub fn open_launch(&mut self, paths: Vec<PathBuf>, only: bool) -> Vec<Effect> {
         self.launch.clear();
+        self.launch_only = only;
         self.add_launch(paths)
     }
 
@@ -503,18 +510,35 @@ impl App {
         }
         match self.launch.as_slice() {
             [] => Vec::new(),
-            [one] => {
+            [one] if !self.launch_only => {
                 let one = one.clone();
                 self.open_path(&one)
             }
-            many => {
-                let many = many.to_vec();
-                self.open_selection(many)
+            files => {
+                let files = files.to_vec();
+                self.open_selection(files)
             }
         }
     }
 
+    /// Files chosen in the Open dialog: one browses its folder unless `only`.
+    pub fn open_files(&mut self, files: Vec<PathBuf>, only: bool) -> Vec<Effect> {
+        match files.as_slice() {
+            [] => Vec::new(),
+            [one] if !only => {
+                let one = one.clone();
+                self.open_path(&one)
+            }
+            _ => self.open_selection(files),
+        }
+    }
+
+    /// Shows just `files`, without the rest of their folders.
     fn open_selection(&mut self, mut files: Vec<PathBuf>) -> Vec<Effect> {
+        if self.edit.is_some() {
+            self.show_toast("Save or cancel the edit first");
+            return Vec::new();
+        }
         files.retain(|p| p.is_file());
         files.sort_by(|a, b| sys::natural_cmp(a, b));
         files.dedup();
@@ -529,6 +553,12 @@ impl App {
 
     /// Opens a file (browsing its folder) or the first image in a folder.
     pub fn open_path(&mut self, path: &Path) -> Vec<Effect> {
+        // An explicit open reads the files afresh.
+        self.cache.clear();
+        self.open_in_folder(path)
+    }
+
+    fn open_in_folder(&mut self, path: &Path) -> Vec<Effect> {
         if self.edit.is_some() {
             self.show_toast("Save or cancel the edit first");
             return Vec::new();
@@ -555,8 +585,6 @@ impl App {
         }
         self.folder = Some(dir);
         self.selection = false;
-        // An explicit open reads the files afresh.
-        self.cache.clear();
         self.browse(files, index)
     }
 
@@ -1571,7 +1599,13 @@ impl App {
                 self.popover = None;
                 self.focus = None;
             }
-            Action::Open => return vec![Effect::OpenDialog],
+            Action::Open => return vec![Effect::OpenDialog { only: false }],
+            Action::OpenOnly => return vec![Effect::OpenDialog { only: true }],
+            Action::BrowseFolder => {
+                if let (true, Some(p)) = (self.selection, self.current().map(Path::to_path_buf)) {
+                    return self.open_in_folder(&p);
+                }
+            }
             Action::Prev => return self.step(-1),
             Action::Next => return self.step(1),
             Action::ZoomIn => self.zoom_by(ZOOM_STEP, None, true),
@@ -1591,6 +1625,7 @@ impl App {
             Action::ToggleMark(s) => return self.toggle_mark(s),
             Action::SendMarked => self.open_dialog(Dialog::Send),
             Action::ManageMarks => self.open_dialog(Dialog::ManageMarks),
+            Action::Preferences => self.open_dialog(Dialog::Preferences),
             Action::Shortcuts => self.open_dialog(Dialog::Shortcuts),
             Action::About => self.open_dialog(Dialog::About),
             Action::Minimize => return vec![Effect::Minimize],
@@ -1618,23 +1653,18 @@ impl App {
             Action::ClearMarkDir(slot) => {
                 self.update_settings(|st| st.mark_dirs[usize::from(slot)] = None);
             }
-            Action::Install => self.open_dialog(Dialog::Install),
-            Action::ConfirmInstall => {
-                self.dialog = None;
-                return vec![Effect::Install];
-            }
+            // Preferences explains what installing does next to the button.
+            Action::Install => return vec![Effect::Install],
             Action::DefaultApps => return vec![Effect::DefaultApps],
             Action::CheckUpdates => self.check_for_updates(true),
             Action::ToggleAutoUpdate => {
-                let on = self.update_settings(|st| {
-                    st.auto_update = !st.auto_update;
-                    st.auto_update
-                });
-                self.show_toast(if on { "Automatic updates on" } else { "Automatic updates off" });
+                self.update_settings(|st| st.auto_update = !st.auto_update);
+                self.maybe_check_for_updates();
             }
             Action::Restart => return vec![Effect::Restart(self.current().map(Path::to_path_buf))],
-            Action::OpenProfile => return vec![Effect::OpenUrl(crate::release::profile_url())],
             Action::OpenProject => return vec![Effect::OpenUrl(crate::release::project_url())],
+            Action::ReportIssue => return vec![Effect::OpenUrl(crate::release::issues_url())],
+            Action::CloseToast => self.toast = None,
             Action::SendCopy => self.send(SendMode::Copy),
             Action::SendMove => self.send(SendMode::Move),
         }
@@ -1702,7 +1732,6 @@ impl App {
             }
             // The default response of an alert, as in AdwAlertDialog.
             Key::Enter if self.dialog == Some(Dialog::Send) && !self.send_summary().is_empty() => self.activate(Action::SendCopy),
-            Key::Enter if self.dialog == Some(Dialog::Install) => self.activate(Action::ConfirmInstall),
             Key::Enter if ctrl && self.edit.is_some() => {
                 self.save_edit(false);
                 Vec::new()
@@ -1729,7 +1758,9 @@ impl App {
             Key::F10 => self.activate(Action::MainMenu),
             Key::F11 => self.activate(Action::Fullscreen),
             Key::Letter(c) if ctrl => match (c, shift) {
-                ('o', _) if self.edit.is_none() => self.activate(Action::Open),
+                ('o', false) if self.edit.is_none() => self.activate(Action::Open),
+                ('o', true) if self.edit.is_none() => self.activate(Action::OpenOnly),
+                ('b', _) if self.edit.is_none() => self.activate(Action::BrowseFolder),
                 ('s', _) if self.edit.is_some() => self.activate(Action::EditSave),
                 ('r', false) => self.rotate_shortcut(true),
                 ('r', true) => self.rotate_shortcut(false),
@@ -1744,6 +1775,7 @@ impl App {
                 ('+', _) | ('=', _) => self.activate(Action::ZoomIn),
                 ('-', _) => self.activate(Action::ZoomOut),
                 ('?', _) | ('/', true) => self.activate(Action::Shortcuts),
+                (',', _) => self.activate(Action::Preferences),
                 _ => return None,
             },
             _ => return None,

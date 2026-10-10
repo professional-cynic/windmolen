@@ -4,8 +4,9 @@
 //! Registers the app the way Windows expects of a default-app candidate:
 //! a ProgID per extension, `OpenWithProgids` entries, an `Applications`
 //! entry, `Capabilities` under `RegisteredApplications` (which lists it in
-//! Settings › Default apps), a right-click verb that accepts multiple
-//! files, a Start menu shortcut and an entry in Settings › Apps.
+//! Settings › Default apps), a right-click verb that opens just the chosen
+//! files (not their folder), a Start menu shortcut and an entry in
+//! Settings › Apps.
 //!
 //! Windows does not let an app make itself the default: the user confirms
 //! that in Settings, which we open for them.
@@ -172,6 +173,8 @@ fn unregister_extensions() {
 fn register(exe: &Path, exts: &[String]) -> Result<(), String> {
     let exe_s = exe.display().to_string();
     let open = format!("\"{exe_s}\" \"%1\"");
+    // The right-click verb opens just the chosen files, not their folder.
+    let open_only = format!("\"{exe_s}\" --only \"%1\"");
     let icon = format!("\"{exe_s}\",0");
     let exts: Vec<&str> = exts.iter().map(String::as_str).filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric())).collect();
 
@@ -204,7 +207,7 @@ fn register(exe: &Path, exts: &[String]) -> Result<(), String> {
         set(&verb, "", &format!("Open in {NAME}"))?;
         set(&verb, "Icon", &icon)?;
         set(&verb, "MultiSelectModel", "Player")?;
-        set(&format!(r"{verb}\command"), "", &open)?;
+        set(&format!(r"{verb}\command"), "", &open_only)?;
     }
     set(r"Software\RegisteredApplications", NAME, &caps)?;
     set(APP_KEY, "InstallPath", &exe_s)?;

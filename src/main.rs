@@ -80,13 +80,15 @@ fn main() {
         _ => {}
     }
 
+    // Explorer's "Open in Windmolen" verb shows just the chosen files.
+    let only = args.iter().any(|a| a.as_os_str() == "--only");
     // Absolute, because a gathering instance has its own working directory.
     let files: Vec<std::path::PathBuf> =
         args.into_iter().filter(|a| !a.as_os_str().as_encoded_bytes().starts_with(b"--")).map(|a| std::path::absolute(&a).unwrap_or(a)).collect();
     if let instance::Launch::Forwarded = instance::start(&files) {
         return;
     }
-    let result = window::run(files);
+    let result = window::run(files, only);
     // Exiting ends the worker threads; never in the middle of an update.
     std::mem::forget(update::hold_for_exit());
     if let Err(e) = result {

@@ -12,12 +12,19 @@ use crate::icons::Icon;
 use crate::meta;
 use crate::settings::SLOTS;
 use crate::theme::{ACCENTS, BORDER_OPACITY, Color, DIM_OPACITY};
-use crate::ui::{Action, Align, Cmd, Content, Style, TextStyle, Ui};
+use crate::ui::{Action, Align, CARD_SHADOW, Cmd, Content, DIALOG_SHADOW, POPOVER_SHADOW, Style, TOAST_SHADOW, TextStyle, Ui};
 
 const BTN: f32 = 34.0;
 const GAP: f32 = 6.0;
-const ROW_H: f32 = 58.0;
-const MENU_ROW: f32 = 34.0;
+/// An `AdwActionRow` with a subtitle: 2 px row padding, 6 px title margins.
+const ROW_H: f32 = 56.0;
+/// The single-line minimum: 50 plus the row padding.
+const ROW_MIN: f32 = 54.0;
+/// Where row text starts: row padding plus header margin.
+const ROW_INSET: f32 = 14.0;
+const MENU_ROW: f32 = 32.0;
+/// A preferences group's heading plus the space below it.
+const GROUP_HEAD: f32 = 32.0;
 
 /// Where popovers attach.
 #[derive(Default)]
@@ -105,7 +112,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
     let mut left = GAP;
     let (title, subtitle) = if app.edit.is_some() {
         let label = "Cancel";
-        let bw = ui.text_width(label, TextStyle::Body) + 34.0;
+        let bw = ui.text_width(label, TextStyle::Heading) + 34.0;
         ui.button(Rect::new(left, y, bw, BTN), Action::EditCancel, Content::Label(label), Style::Normal, fg, true, false, None);
         left += bw + GAP;
 
@@ -119,7 +126,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         let arrow = Rect::new(right + lw, y, aw, BTN);
         let enabled = !app.busy();
         let k = if enabled { 1.0 } else { 0.5 };
-        ui.fill(whole, 6.0, t.accent_bg.alpha(k));
+        ui.fill(whole, 9.0, t.accent_bg.alpha(k));
         for (part, action) in [(main, Action::EditSave), (arrow, Action::SaveMenu)] {
             let state = (app.hover == Some(action), app.pressed == Some(action));
             let tint = match state {
@@ -130,11 +137,11 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
             };
             if let (Some(c), true) = (tint, enabled) {
                 ui.cmds.push(Cmd::Clip(part));
-                ui.fill(whole, 6.0, c);
+                ui.fill(whole, 9.0, c);
                 ui.cmds.push(Cmd::Unclip);
             }
             if app.focus == Some(action) {
-                ui.stroke(part.inset(1.0), 5.0, t.accent_fg.alpha(0.6), 2.0);
+                ui.stroke(part.inset(1.0), 8.0, t.accent_fg.alpha(0.6), 2.0);
             }
             ui.widgets.push(crate::ui::Widget { rect: part, action, tooltip: None, enabled, focusable: true });
         }
@@ -174,6 +181,8 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         }
 
         match app.current() {
+            // A lone image opened on its own needs no position.
+            Some(p) if app.selection && app.files.len() == 1 => (file_name(p), None),
             Some(p) => {
                 let sel = if app.selection { " selected" } else { "" };
                 (file_name(p), Some(format!("{} of {}{sel}", app.index + 1, app.files.len())))
@@ -287,7 +296,7 @@ fn osd(app: &App, ui: &mut Ui, vp: Rect) {
     nav_buttons(app, ui, vp);
     let fg = ui.t.osd_fg;
     let label = if app.effective_view().fit { "Best Fit".to_owned() } else { format!("{:.0}%", app.zoom_percent()) };
-    let lw = ui.text_width("Best Fit", TextStyle::Numeric).max(ui.text_width(&label, TextStyle::Numeric)) + 28.0;
+    let lw = ui.text_width("Best Fit", TextStyle::Heading).max(ui.text_width(&label, TextStyle::Heading)) + 28.0;
     let y = vp.bottom() - 18.0 - BTN;
     let mut x = vp.right() - 18.0 - BTN;
     ui.button(Rect::new(x, y, BTN, BTN), Action::ZoomIn, Content::Icon(Icon::ZoomIn), Style::Osd, fg, true, false, Some("Zoom In (+)"));
@@ -419,9 +428,9 @@ fn toolbar(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
     ui.hline(0.0, w, bar.y, t.headerbar_shade);
     let fg = t.headerbar_fg;
     let aspect = app.edit.as_ref().map_or(Aspect::Free, |e| e.aspect).label();
-    let aw = ui.text_width(&aspect, TextStyle::Body) + 16.0 + 6.0 + 24.0;
+    let aw = ui.text_width(&aspect, TextStyle::Heading) + 16.0 + 6.0 + 24.0;
     let reset = "Reset";
-    let rw = ui.text_width(reset, TextStyle::Body) + 34.0;
+    let rw = ui.text_width(reset, TextStyle::Heading) + 34.0;
     let total = 4.0 * BTN + 2.0 * GAP + 18.0 + aw + 18.0 + rw + GAP;
     let mut x = (w - total) / 2.0;
     let y = bar.y + (TOOLBAR_H - BTN) / 2.0 + 0.5;
@@ -485,7 +494,7 @@ fn properties(app: &App) -> Vec<Group> {
 }
 
 fn groups_height(groups: &[Group]) -> f32 {
-    groups.iter().map(|(_, rows)| 30.0 + rows.len() as f32 * ROW_H + 24.0).sum::<f32>() + 12.0
+    12.0 + groups.iter().map(|(_, rows)| GROUP_HEAD + rows.len() as f32 * ROW_H + 24.0).sum::<f32>() - 12.0
 }
 
 pub fn sidebar_max_scroll(app: &App) -> f32 {
@@ -496,40 +505,55 @@ fn max_scroll(app: &App, groups: &[Group]) -> f32 {
     (groups_height(groups) - (app.height() - app.content_top())).max(0.0)
 }
 
-fn boxed_list(ui: &mut Ui, r: Rect) {
+/// A `.boxed-list` on a surface of colour `under`.
+fn boxed_list(ui: &mut Ui, r: Rect, under: Color) {
     let t = ui.t;
-    ui.shadow(r, 12.0, 0.6);
-    ui.fill(r, 12.0, if t.dark { t.sidebar_bg } else { Color::WHITE });
+    ui.box_shadow(r, 12.0, CARD_SHADOW);
+    // CSS paints a shadow outside its box only; cover the part beneath,
+    // which would show through the translucent dark card colour.
+    ui.fill(r, 12.0, under);
     ui.fill(r, 12.0, t.card_bg);
-    ui.stroke(r.inset(0.5), 11.5, t.card_shade, 1.0);
+}
+
+/// The border between two rows of a boxed list, at the top of row `y`.
+fn row_separator(ui: &mut Ui, x: f32, w: f32, y: f32) {
+    ui.hline(x, x + w, y - 1.0, ui.t.card_shade);
+}
+
+/// A preferences group's heading.
+fn group_title(ui: &mut Ui, x: f32, y: f32, w: f32, title: &str, fg: Color) {
+    ui.text(Rect::new(x, y, w, GROUP_HEAD - 12.0), title, TextStyle::Heading, fg, Align::Start);
 }
 
 fn sidebar(app: &App, ui: &mut Ui) {
     let t = ui.t;
     let top = app.content_top();
     let area = Rect::new(app.width() - SIDEBAR_W, top, SIDEBAR_W, app.height() - top);
-    ui.fill(area, 0.0, t.sidebar_bg);
-    ui.vline(area.x - 1.0, top, area.bottom(), t.headerbar_shade);
+    let bg = if app.active { t.sidebar_bg } else { t.sidebar_backdrop };
+    ui.fill(area, 0.0, bg);
+    ui.vline(area.x, top, area.bottom(), t.sidebar_border);
     ui.widget(area, Action::None, None);
     let groups = properties(app);
     let scroll = app.props_scroll.min(max_scroll(app, &groups));
-    ui.cmds.push(Cmd::Clip(area));
+    ui.cmds.push(Cmd::Clip(Rect::from_edges(area.x + 1.0, area.y, area.right(), area.bottom())));
     let fg = t.window_fg;
     let x = area.x + 12.0;
     let w = SIDEBAR_W - 24.0;
     let mut y = top + 12.0 - scroll;
     for (title, rows) in groups {
-        ui.text(Rect::new(x + 6.0, y, w, 24.0), title, TextStyle::Heading, fg, Align::Start);
-        y += 30.0;
+        group_title(ui, x, y, w, title, fg);
+        y += GROUP_HEAD;
         let list = Rect::new(x, y, w, rows.len() as f32 * ROW_H);
-        boxed_list(ui, list);
+        boxed_list(ui, list, bg);
+        // `.property` rows: a small dimmed title above the value.
         for (i, (label, value)) in rows.iter().enumerate() {
             let ry = y + i as f32 * ROW_H;
             if i > 0 {
-                ui.hline(x, x + w, ry - 0.5, fg.alpha(BORDER_OPACITY));
+                row_separator(ui, x, w, ry);
             }
-            ui.text(Rect::new(x + 12.0, ry + 9.0, w - 24.0, 18.0), label.as_str(), TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Start);
-            ui.text(Rect::new(x + 12.0, ry + 27.0, w - 24.0, 22.0), value.as_str(), TextStyle::Body, fg, Align::Start);
+            let tw = w - 2.0 * ROW_INSET;
+            ui.text(Rect::new(x + ROW_INSET, ry + 8.0, tw, 17.0), label.as_str(), TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Start);
+            ui.text(Rect::new(x + ROW_INSET, ry + 28.0, tw, 20.0), value.as_str(), TextStyle::Body, fg, Align::Start);
         }
         y += list.h + 24.0;
     }
@@ -540,19 +564,25 @@ fn sidebar(app: &App, ui: &mut Ui) {
 // Toast and tooltip
 // ------------------------------------------------------------------------
 
+/// An `AdwToast`: a pill with its close button, 24 px above the bottom.
 fn toast(app: &App, ui: &mut Ui) {
     let Some(toast) = &app.toast else { return };
-    let t = ui.t;
-    let max_w = (app.width() - 48.0).max(100.0);
-    let tw = ui.text_width(&toast.text, TextStyle::Body).min(max_w - 36.0);
-    let r = Rect::new((app.width() - tw - 36.0) / 2.0, 0.0, tw + 36.0, 40.0);
-    let bottom = app.height() - 12.0 - if app.edit.is_some() { TOOLBAR_H } else { 0.0 };
+    let max_w = (app.width() - 24.0).max(120.0);
+    // Padding 12 + label margin 6, then 6 + spacing 6 + button 34 + padding 6.
+    let tw = ui.text_width(&toast.text, TextStyle::Body).min(max_w - 70.0);
+    let (w, h) = (tw + 70.0, 46.0);
+    let bottom = app.height() - 24.0 - if app.edit.is_some() { TOOLBAR_H } else { 0.0 };
     let lift = (1.0 - app.toast_alpha()) * 12.0;
-    let r = Rect::new(r.x, bottom - r.h + lift, r.w, r.h);
+    let r = Rect::new(((app.width() - w) / 2.0).round(), bottom - h + lift, w, h);
     ui.alpha = app.toast_alpha();
-    ui.shadow(r, 20.0, 1.0);
-    ui.fill(r, 20.0, Color::rgba(0, 0, 6, 0.85));
-    ui.text(Rect::new(r.x + 18.0, r.y, tw, r.h), toast.text.as_str(), TextStyle::Body, t.osd_fg, Align::Centre);
+    ui.box_shadow(r, h / 2.0, TOAST_SHADOW);
+    ui.fill(r, h / 2.0, Color::hex(0x505053));
+    ui.widget(r, Action::None, None);
+    ui.text(Rect::new(r.x + 18.0, r.y, tw, h), toast.text.as_str(), TextStyle::Body, Color::WHITE, Align::Start);
+    let close = Rect::new(r.right() - 6.0 - BTN, r.y + 6.0, BTN, BTN);
+    ui.radius = BTN / 2.0;
+    ui.button(close, Action::CloseToast, Content::Icon(Icon::WindowClose), Style::Flat, Color::WHITE, true, false, Some("Dismiss"));
+    ui.radius = 9.0;
     ui.alpha = 1.0;
 }
 
@@ -564,8 +594,8 @@ fn tooltip(app: &App, ui: &mut Ui) {
     let Some((text, anchor)) = ui.widgets.iter().rev().find(|w| w.rect.contains(mx, my)).and_then(|w| Some((w.tooltip.clone()?, w.rect))) else {
         return;
     };
-    let tw = ui.text_width(&text, TextStyle::Caption);
-    let (w, h) = (tw + 20.0, 28.0);
+    let (tw, th) = ui.m.measure(&text, TextStyle::Body, 360.0, false);
+    let (w, h) = (tw + 20.0, th + 12.0);
     let mut x = (anchor.cx() - w / 2.0).clamp(6.0, (app.width() - w - 6.0).max(6.0));
     let mut y = anchor.bottom() + 6.0;
     if y + h > app.height() - 6.0 {
@@ -574,8 +604,9 @@ fn tooltip(app: &App, ui: &mut Ui) {
     x = x.round();
     y = y.round();
     let r = Rect::new(x, y, w, h);
-    ui.fill(r, 6.0, Color::rgba(0, 0, 6, 0.8));
-    ui.text(r, text, TextStyle::Caption, Color::WHITE, Align::Centre);
+    ui.fill(r, 9.0, Color::rgba(0, 0, 6, 0.8));
+    ui.stroke(r.inset(0.5), 8.5, Color::WHITE.alpha(0.1), 1.0);
+    ui.text(r, text, TextStyle::Body, Color::WHITE, Align::Centre);
 }
 
 // ------------------------------------------------------------------------
@@ -591,48 +622,38 @@ fn entry<'s>(action: Action, label: impl Into<String>, accel: Option<&'s str>) -
     Item::Entry { action, label: label.into(), accel, check: None, enabled: true }
 }
 
+/// GTK's popover arrow: 24 wide at the base, 12 tall.
+const TAIL_W: f32 = 24.0;
+const TAIL_H: f32 = 12.0;
+
 fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
     const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    let can_send = !app.busy() && app.settings.counts().iter().any(|&c| c > 0);
     let (anchor, items, above): (Option<Rect>, Vec<Item>, bool) = match p {
-        Popover::Main => {
-            let mut v = vec![
-                entry(Action::Open, "Open…", Some("Ctrl+O")),
-                Item::Separator,
+        // App-wide actions, then the HIG's standard items.
+        Popover::Main => (
+            anchors.main,
+            vec![
                 Item::Entry {
-                    action: Action::SendMarked, label: "Send Marked Files…".into(), accel: Some("Ctrl+M"), check: None, enabled: can_send
+                    action: Action::OpenOnly,
+                    label: "Open Image Only…".into(),
+                    accel: Some("Ctrl+Shift+O"),
+                    check: None,
+                    enabled: app.edit.is_none(),
                 },
-                entry(Action::ManageMarks, "Manage Marks…", None),
+                Item::Entry {
+                    action: Action::BrowseFolder,
+                    label: "Browse Folder".into(),
+                    accel: Some("Ctrl+B"),
+                    check: None,
+                    enabled: app.selection && app.current().is_some() && app.edit.is_none(),
+                },
                 Item::Separator,
-            ];
-            match app.installed {
-                None => v.push(entry(Action::Install, "Install…", None)),
-                Some(false) => v.push(entry(Action::Install, "Update Installation…", None)),
-                Some(true) => {}
-            }
-            if app.installed.is_some() {
-                v.push(entry(Action::DefaultApps, "Default Apps…", None));
-            }
-            v.push(Item::Separator);
-            v.push(Item::Entry {
-                action: Action::CheckUpdates,
-                label: "Check for Updates…".into(),
-                accel: None,
-                check: None,
-                enabled: !matches!(app.update, crate::app::UpdateState::Checking { .. }),
-            });
-            v.push(Item::Entry {
-                action: Action::ToggleAutoUpdate,
-                label: "Automatic Updates".into(),
-                accel: None,
-                check: Some(app.settings.auto_update),
-                enabled: true,
-            });
-            v.push(Item::Separator);
-            v.push(entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")));
-            v.push(entry(Action::About, "About Windmolen", None));
-            (anchors.main, v, false)
-        }
+                entry(Action::Preferences, "Preferences", Some("Ctrl+,")),
+                entry(Action::Shortcuts, "Keyboard Shortcuts", Some("Ctrl+?")),
+                entry(Action::About, "About Windmolen", None),
+            ],
+            false,
+        ),
         Popover::Marks => {
             let bits = app.current_marks();
             let has = app.current().is_some();
@@ -654,7 +675,7 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
                 label: "Send Marked Files…".into(),
                 accel: Some("Ctrl+M"),
                 check: None,
-                enabled: can_send,
+                enabled: !app.busy() && app.settings.counts().iter().any(|&c| c > 0),
             });
             v.push(entry(Action::ManageMarks, "Manage Marks…", None));
             (anchors.marks, v, false)
@@ -690,25 +711,30 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
         .map(|i| match i {
             Item::Entry { label, accel, check, .. } => {
                 ui.text_width(label, TextStyle::Body)
-                    + accel.map_or(0.0, |a| ui.text_width(a, TextStyle::Body) + 24.0)
-                    + if check.is_some() { 24.0 } else { 0.0 }
+                    + accel.map_or(0.0, |a| ui.text_width(a, TextStyle::Body) + 12.0)
+                    + if check.is_some() { 20.0 } else { 0.0 }
                     + 24.0
             }
             Item::Separator => 0.0,
         })
-        .fold(180.0f32, f32::max)
+        .fold(160.0f32, f32::max)
         + 12.0;
     let height = 12.0 + items.iter().map(|i| if matches!(i, Item::Separator) { 13.0 } else { MENU_ROW }).sum::<f32>();
-    let x = (anchor.right() - width).max(6.0).min(app.width() - width - 6.0);
-    let x = if anchor.cx() < app.width() / 2.0 { anchor.x.min(app.width() - width - 6.0).max(6.0) } else { x };
-    let y = if above { anchor.y - 6.0 - height } else { anchor.bottom() + 6.0 };
+    // Centred on the button, kept inside the window.
+    let x = (anchor.cx() - width / 2.0).min(app.width() - width - 6.0).max(6.0).round();
+    let y = if above { anchor.y - 2.0 - TAIL_H - height } else { anchor.bottom() + 2.0 + TAIL_H };
     let r = Rect::new(x, y.max(6.0), width, height);
+    let tx = anchor.cx().clamp(r.x + 15.0 + TAIL_W / 2.0, r.right() - 15.0 - TAIL_W / 2.0);
+    let (base, tip) = if above { (r.bottom(), r.bottom() + TAIL_H) } else { (r.y, r.y - TAIL_H) };
+    let tail = |grow: f32| {
+        let d = if above { grow } else { -grow };
+        vec![(tx - TAIL_W / 2.0 - grow, base), (tx, tip + d), (tx + TAIL_W / 2.0 + grow, base)]
+    };
 
-    ui.shadow(r, 12.0, 1.4);
-    ui.fill(r, 12.0, t.popover_bg);
-    if t.dark {
-        ui.stroke(r.inset(0.5), 11.5, Color::WHITE.alpha(0.07), 1.0);
-    }
+    ui.box_shadow(r, 15.0, POPOVER_SHADOW);
+    ui.cmds.push(Cmd::Polygon { points: tail(1.0), c: Color::BLACK.alpha(0.05 * ui.alpha) });
+    ui.fill(r, 15.0, t.popover_bg);
+    ui.cmds.push(Cmd::Polygon { points: tail(0.0), c: t.popover_bg.alpha(ui.alpha) });
     ui.widget(r, Action::None, None);
     let mut iy = r.y + 6.0;
     for item in items {
@@ -734,20 +760,24 @@ struct Frame {
     scroll: f32,
 }
 
-/// An `AdwDialog`: dimmed backdrop, rounded sheet, header with close button.
+fn is_alert(d: Dialog) -> bool {
+    matches!(d, Dialog::Send | Dialog::Replace)
+}
+
+/// An `AdwDialog` (or `AdwAlertDialog`): dimmed backdrop, floating sheet,
+/// and a header bar with a close button.
 fn dialog_frame(app: &App, ui: &mut Ui, width: f32, content_h: f32, title: Option<&str>, alert: bool) -> Frame {
     let t = ui.t;
     let full = Rect::new(0.0, 0.0, app.width(), app.height());
     ui.modal(Some(t.dimming), full, if alert { Action::None } else { Action::Dismiss });
     let header = if alert { 0.0 } else { HEADER_H };
+    let radius = if alert { 18.0 } else { 15.0 };
     let w = width.min(app.width() - 24.0);
     let h = (header + content_h).min(app.height() - 24.0);
     let r = full.centred(w, h).round();
-    ui.shadow(r, 12.0, 2.0);
-    ui.fill(r, 12.0, t.dialog_bg);
-    if t.dark {
-        ui.stroke(r.inset(0.5), 11.5, Color::WHITE.alpha(0.07), 1.0);
-    }
+    ui.box_shadow(r, radius, DIALOG_SHADOW);
+    ui.fill(r, radius, t.dialog_bg);
+    ui.stroke(r.inset(0.5), radius - 0.5, Color::WHITE.alpha(0.07), 1.0);
     ui.widget(r, Action::None, None);
     if !alert {
         let fg = t.window_fg;
@@ -765,7 +795,7 @@ fn dialog_frame(app: &App, ui: &mut Ui, width: f32, content_h: f32, title: Optio
 pub fn dialog_max_scroll(app: &App) -> f32 {
     let Some(d) = app.dialog else { return 0.0 };
     let (_, h) = dialog_size(app, d);
-    let header = if matches!(d, Dialog::Send | Dialog::Replace | Dialog::Install) { 0.0 } else { HEADER_H };
+    let header = if is_alert(d) { 0.0 } else { HEADER_H };
     (header + h - (app.height() - 24.0)).max(0.0)
 }
 
@@ -774,7 +804,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         "General",
         &[
             ("Open", "Ctrl+O"),
+            ("Open image only", "Ctrl+Shift+O"),
+            ("Browse its folder", "Ctrl+B"),
             ("Main menu", "F10"),
+            ("Preferences", "Ctrl+,"),
             ("Keyboard shortcuts", "Ctrl+?"),
             ("Properties", "F9 / I"),
             ("Fullscreen", "F11"),
@@ -785,11 +818,11 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     (
         "Zoom",
         &[
-            ("Zoom in / out", "+ / − / wheel"),
+            ("Zoom in / out", "+ / − / Wheel"),
             ("Best fit", "F / Ctrl+0"),
             ("Original size", "0 / Ctrl+1"),
             ("Toggle best fit", "Double-click"),
-            ("Move around", "Drag / arrows"),
+            ("Move around", "Drag / Arrows"),
         ],
     ),
     ("Marks", &[("Toggle mark", "1 – 9"), ("Marks menu", "M"), ("Remove marks from image", "U"), ("Send marked files", "Ctrl+M")]),
@@ -805,12 +838,18 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// `.shortcut-row`: padding 9 around a 36 px line.
+const SHORTCUT_ROW: f32 = 54.0;
+
 fn alert_body(app: &App, d: Dialog) -> (String, String) {
     match d {
         Dialog::Send => {
             let summary = app.send_summary();
             if summary.is_empty() {
-                ("Nothing to Send".into(), "No marked images have a destination folder. Press 1 – 9 to mark images, and choose folders in Manage Marks.".into())
+                (
+                    "Nothing to Send".into(),
+                    "No marked images have a destination folder. Press 1 – 9 to mark images, and choose folders in Manage Marks.".into(),
+                )
             } else {
                 let lines: Vec<String> = summary
                     .iter()
@@ -822,11 +861,6 @@ fn alert_body(app: &App, d: Dialog) -> (String, String) {
                 ("Send Marked Files?".into(), format!("{}\n\nMarks are removed once their files have been sent.", lines.join("\n")))
             }
         }
-        Dialog::Install => (
-            if app.installed == Some(false) { "Update Installation?" } else { "Install Windmolen?" }.into(),
-            "It is copied to your user folder and added to the Start menu, to Open with and to the right-click menu of images. No administrator rights are needed.\n\nWindows then asks you to confirm it as your default image viewer in Settings."
-                .into(),
-        ),
         Dialog::Replace => {
             let name = app.current().map(file_name).unwrap_or_default();
             ("Replace Original?".into(), format!("“{name}” will be overwritten with the edited image. This can't be undone."))
@@ -835,45 +869,182 @@ fn alert_body(app: &App, d: Dialog) -> (String, String) {
     }
 }
 
+/// What sits at the end of a preferences row.
+enum Suffix {
+    Button { label: &'static str, action: Action, style: Style, enabled: bool },
+    Switch { action: Action, on: bool },
+}
+
+struct PrefRow {
+    title: &'static str,
+    subtitle: String,
+    suffix: Suffix,
+}
+
+fn preferences(app: &App) -> Vec<(&'static str, Vec<PrefRow>)> {
+    let button = |label, action, style| Suffix::Button { label, action, style, enabled: true };
+    let mut install = vec![match app.installed {
+        None => PrefRow {
+            title: "Install Windmolen",
+            subtitle: "Adds it to the Start menu, Open with and the right-click menu of images, for you only. No administrator rights needed.".into(),
+            suffix: button("Install", Action::Install, Style::Suggested),
+        },
+        Some(false) => PrefRow {
+            title: "Update Installation",
+            subtitle: "Replaces the installed copy with this version".into(),
+            suffix: button("Update", Action::Install, Style::Suggested),
+        },
+        Some(true) => PrefRow {
+            title: "Image Formats",
+            subtitle: "Registers formats added since installing, such as codecs from the Microsoft Store".into(),
+            suffix: button("Register", Action::Install, Style::Normal),
+        },
+    }];
+    if app.installed.is_some() {
+        install.push(PrefRow {
+            title: "Default App",
+            subtitle: "Windows lets only you choose the app that opens images".into(),
+            suffix: button("Open Settings", Action::DefaultApps, Style::Normal),
+        });
+    }
+    let status = match &app.update {
+        crate::app::UpdateState::Checking { .. } => "Checking…".to_owned(),
+        crate::app::UpdateState::Ready(v) => format!("Windmolen {v} is ready; restart to use it"),
+        crate::app::UpdateState::Idle => concat!("This is version ", env!("CARGO_PKG_VERSION")).to_owned(),
+    };
+    let updates = vec![
+        PrefRow {
+            title: "Automatic Updates",
+            subtitle: "Checks GitHub once a day and installs new versions".into(),
+            suffix: Suffix::Switch { action: Action::ToggleAutoUpdate, on: app.settings.auto_update },
+        },
+        PrefRow {
+            title: "Check for Updates",
+            subtitle: status,
+            suffix: Suffix::Button {
+                label: "Check Now",
+                action: Action::CheckUpdates,
+                style: Style::Normal,
+                enabled: matches!(app.update, crate::app::UpdateState::Idle),
+            },
+        },
+    ];
+    vec![("Installation", install), ("Updates", updates)]
+}
+
+/// Preferences page width and its lists' inset (`AdwPreferencesPage`).
+const PREFS_W: f32 = 560.0;
+const PAGE_MARGIN: f32 = 24.0;
+
+fn suffix_width(m: &dyn crate::ui::Measure, s: &Suffix) -> f32 {
+    match s {
+        Suffix::Button { label, .. } => m.measure(label, TextStyle::Heading, f32::MAX, false).0 + 34.0,
+        Suffix::Switch { .. } => 46.0,
+    }
+}
+
+/// Row height and subtitle height of a preferences row `w` wide.
+fn pref_row_height(m: &dyn crate::ui::Measure, row: &PrefRow, w: f32) -> (f32, f32) {
+    let text_w = pref_text_width(m, row, w);
+    let (_, th) = m.measure(row.title, TextStyle::Body, text_w, true);
+    let (_, sh) = m.measure(&row.subtitle, TextStyle::Caption, text_w, true);
+    ((2.0 + 6.0 + th + 3.0 + sh + 6.0 + 2.0).max(ROW_MIN), sh)
+}
+
+/// Room for a row's title and subtitle, before the 6 px suffix spacing.
+fn pref_text_width(m: &dyn crate::ui::Measure, row: &PrefRow, w: f32) -> f32 {
+    w - 2.0 * ROW_INSET - suffix_width(m, &row.suffix) - 6.0
+}
+
 /// (width, content height) of each dialog.
 fn dialog_size(app: &App, d: Dialog) -> (f32, f32) {
     let m = &app.r.text;
     use crate::ui::Measure;
     match d {
-        Dialog::Send | Dialog::Replace | Dialog::Install => {
+        Dialog::Send | Dialog::Replace => {
             let w = 372.0f32.min(app.width() - 24.0);
             let (head, body) = alert_body(app, d);
             let (_, hh) = m.measure(&head, TextStyle::Title2, w - 48.0, true);
             let (_, bh) = m.measure(&body, TextStyle::Body, w - 48.0, true);
-            (w, 32.0 + hh + 10.0 + bh + 24.0 + 40.0 + 24.0)
+            (w, ALERT_TOP + hh + 10.0 + bh + ALERT_GAP + ALERT_BUTTON + 24.0)
         }
-        Dialog::Shortcuts => (480.0, SHORTCUTS.iter().map(|(_, rows)| 30.0 + rows.len() as f32 * 40.0 + 18.0).sum::<f32>() + 6.0),
-        Dialog::About => (360.0, 360.0),
+        Dialog::Preferences => {
+            let w = PREFS_W.min(app.width() - 24.0);
+            let lw = w - 2.0 * PAGE_MARGIN;
+            let groups = preferences(app);
+            let lists: f32 = groups.iter().map(|(_, rows)| GROUP_HEAD + rows.iter().map(|r| pref_row_height(m, r, lw).0).sum::<f32>()).sum();
+            (w, PAGE_MARGIN + lists + 24.0 * (groups.len() as f32 - 1.0) + PAGE_MARGIN)
+        }
+        Dialog::Shortcuts => {
+            (480.0, 12.0 + SHORTCUTS.iter().map(|(_, rows)| GROUP_HEAD + rows.len() as f32 * SHORTCUT_ROW + 18.0).sum::<f32>() - 18.0 + 24.0)
+        }
+        Dialog::About => (360.0, ABOUT_H),
         Dialog::ManageMarks => {
             let w = 520.0f32.min(app.width() - 24.0);
-            let (_, ph) = m.measure(MARKS_INTRO, TextStyle::Body, w - 48.0, true);
-            (w, 6.0 + ph + 18.0 + SLOTS as f32 * ROW_H + 24.0)
+            let (_, ph) = m.measure(MARKS_INTRO, TextStyle::Body, w - 2.0 * PAGE_MARGIN, true);
+            (w, 6.0 + ph + 18.0 + SLOTS as f32 * ROW_H + PAGE_MARGIN)
         }
     }
 }
 
+/// `AdwAlertDialog`: message padding 32 above, then 9 + 12 before the
+/// 44 px responses.
+const ALERT_TOP: f32 = 32.0;
+const ALERT_GAP: f32 = 21.0;
+const ALERT_BUTTON: f32 = 44.0;
+
+/// `AdwAboutDialog`'s main page: icon, name, developer, version, links.
+const ABOUT_H: f32 = 12.0 + 128.0 + 6.0 + 34.0 + 6.0 + 20.0 + 9.0 + 30.0 + 24.0 + ROW_MIN + 18.0 + ROW_MIN + 18.0;
+
 const MARKS_INTRO: &str =
     "Press 1 – 9 to mark the current image. Each mark sends its files to the folder chosen here; an image can carry several marks.";
+
+/// An activatable row's hover and press highlight, clipped to its list.
+fn row_highlight(ui: &mut Ui, r: Rect, list: Rect, action: Action, fg: Color) {
+    let a = match (ui.hover == Some(action), ui.pressed == Some(action)) {
+        (true, true) => 0.08,
+        (true, false) => 0.04,
+        _ => return,
+    };
+    let top = if r.y <= list.y { 12.0 } else { 0.0 };
+    let bottom = if r.bottom() >= list.bottom() { 12.0 } else { 0.0 };
+    // Round only the list's own corners.
+    ui.cmds.push(Cmd::Clip(r));
+    let grown = Rect::from_edges(r.x, r.y - (12.0 - top), r.right(), r.bottom() + (12.0 - bottom));
+    ui.fill(grown, 12.0, fg.alpha(a));
+    ui.cmds.push(Cmd::Unclip);
+}
+
+/// An `AdwLinkRow`: the title and an external-link icon.
+fn link_row(ui: &mut Ui, r: Rect, list: Rect, title: &str, action: Action, url: &str, fg: Color) {
+    row_highlight(ui, r, list, action, fg);
+    ui.text(Rect::new(r.x + ROW_INSET, r.y, r.w - 2.0 * ROW_INSET - 22.0, r.h), title, TextStyle::Body, fg, Align::Start);
+    ui.icon(Icon::ExternalLink, Rect::new(r.right() - ROW_INSET - 16.0, r.cy() - 8.0, 16.0, 16.0), fg);
+    focus_row(ui, r, action);
+    ui.widgets.push(crate::ui::Widget { rect: r, action, tooltip: Some(url.into()), enabled: true, focusable: true });
+}
+
+fn focus_row(ui: &mut Ui, r: Rect, action: Action) {
+    if ui.focus == Some(action) {
+        ui.stroke(r.inset(1.0), 8.0, ui.t.accent.alpha(0.5), 2.0);
+    }
+}
 
 fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
     let t = ui.t;
     let fg = t.window_fg;
     let (width, content_h) = dialog_size(app, d);
     match d {
-        Dialog::Send | Dialog::Replace | Dialog::Install => {
+        Dialog::Send | Dialog::Replace => {
             let f = dialog_frame(app, ui, width, content_h, None, true);
             let r = f.content;
             let (head, body) = alert_body(app, d);
             let x = r.x + 24.0;
             let w = r.w - 48.0;
-            let mut y = r.y + 32.0;
+            let mut y = r.y + ALERT_TOP;
             y += ui.paragraph(x, y, w, &head, TextStyle::Title2, fg, Align::Centre) + 10.0;
-            y += ui.paragraph(x, y, w, &body, TextStyle::Body, fg, Align::Centre) + 24.0;
+            y += ui.paragraph(x, y, w, &body, TextStyle::Body, fg, Align::Centre) + ALERT_GAP;
+            // Cancel stays neutral: only the response that destroys data is red.
             let buttons: Vec<(&str, Action, Style)> = match d {
                 Dialog::Send if app.send_summary().is_empty() => vec![("Close", Action::Dismiss, Style::Normal)],
                 Dialog::Send => {
@@ -883,37 +1054,78 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
                         ("Copy", Action::SendCopy, Style::Suggested),
                     ]
                 }
-                Dialog::Install => {
-                    let label = if app.installed == Some(false) { "Update" } else { "Install" };
-                    vec![("Cancel", Action::Dismiss, Style::Normal), (label, Action::ConfirmInstall, Style::Suggested)]
-                }
                 _ => vec![("Cancel", Action::Dismiss, Style::Normal), ("Replace", Action::ConfirmReplace, Style::Destructive)],
             };
             let n = buttons.len() as f32;
             let bw = (w - 12.0 * (n - 1.0)) / n;
+            ui.radius = 12.0;
             for (i, (label, action, style)) in buttons.into_iter().enumerate() {
-                let b = Rect::new(x + i as f32 * (bw + 12.0), y.min(r.bottom() - 64.0), bw, 40.0);
+                let b = Rect::new(x + i as f32 * (bw + 12.0), y.min(r.bottom() - 24.0 - ALERT_BUTTON), bw, ALERT_BUTTON);
                 ui.button(b, action, Content::Label(label), style, fg, true, false, None);
             }
+            ui.radius = 9.0;
+        }
+        Dialog::Preferences => {
+            let f = dialog_frame(app, ui, width, content_h, Some("Preferences"), false);
+            ui.cmds.push(Cmd::Clip(f.content));
+            let x = f.content.x + PAGE_MARGIN;
+            let w = f.content.w - 2.0 * PAGE_MARGIN;
+            let mut y = f.content.y + PAGE_MARGIN - f.scroll;
+            for (title, rows) in preferences(app) {
+                group_title(ui, x, y, w, title, fg);
+                y += GROUP_HEAD;
+                let heights: Vec<(f32, f32)> = rows.iter().map(|r| pref_row_height(&app.r.text, r, w)).collect();
+                let list = Rect::new(x, y, w, heights.iter().map(|h| h.0).sum());
+                boxed_list(ui, list, t.dialog_bg);
+                for (i, (row, (rh, sh))) in rows.iter().zip(heights).enumerate() {
+                    let rr = Rect::new(x, y, w, rh);
+                    if i > 0 {
+                        row_separator(ui, x, w, y);
+                    }
+                    let sw = suffix_width(&app.r.text, &row.suffix);
+                    let text_w = pref_text_width(&app.r.text, row, w);
+                    if let Suffix::Switch { action, .. } = row.suffix {
+                        // An `AdwSwitchRow` toggles from anywhere on it.
+                        row_highlight(ui, rr, list, action, fg);
+                        focus_row(ui, rr, action);
+                        ui.widgets.push(crate::ui::Widget { rect: rr, action, tooltip: None, enabled: true, focusable: true });
+                    }
+                    let (_, th) = ui.m.measure(row.title, TextStyle::Body, text_w, true);
+                    let ty = rr.cy() - (th + 3.0 + sh) / 2.0;
+                    ui.paragraph(x + ROW_INSET, ty, text_w, row.title, TextStyle::Body, fg, Align::Start);
+                    ui.paragraph(x + ROW_INSET, ty + th + 3.0, text_w, &row.subtitle, TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Start);
+                    let sx = x + w - ROW_INSET - sw;
+                    match row.suffix {
+                        Suffix::Button { label, action, style, enabled } => {
+                            let b = Rect::new(sx, rr.cy() - BTN / 2.0, sw, BTN);
+                            ui.button(b, action, Content::Label(label), style, fg, enabled, false, None);
+                        }
+                        Suffix::Switch { action, on } => ui.switch(sx, rr.cy() - 13.0, action, on, fg),
+                    }
+                    y += rh;
+                }
+                y += 24.0;
+            }
+            ui.cmds.push(Cmd::Unclip);
         }
         Dialog::Shortcuts => {
             let f = dialog_frame(app, ui, width, content_h, Some("Keyboard Shortcuts"), false);
             ui.cmds.push(Cmd::Clip(f.content));
-            let x = f.content.x + 18.0;
-            let w = f.content.w - 36.0;
-            let mut y = f.content.y + 6.0 - f.scroll;
+            let x = f.content.x + PAGE_MARGIN;
+            let w = f.content.w - 2.0 * PAGE_MARGIN;
+            let mut y = f.content.y + 12.0 - f.scroll;
             for (section, rows) in SHORTCUTS {
-                ui.text(Rect::new(x + 6.0, y, w, 24.0), *section, TextStyle::Heading, fg, Align::Start);
-                y += 30.0;
-                let list = Rect::new(x, y, w, rows.len() as f32 * 40.0);
-                boxed_list(ui, list);
+                group_title(ui, x, y, w, section, fg);
+                y += GROUP_HEAD;
+                let list = Rect::new(x, y, w, rows.len() as f32 * SHORTCUT_ROW);
+                boxed_list(ui, list, t.dialog_bg);
                 for (i, (desc, keys)) in rows.iter().enumerate() {
-                    let ry = y + i as f32 * 40.0;
+                    let ry = y + i as f32 * SHORTCUT_ROW;
                     if i > 0 {
-                        ui.hline(x, x + w, ry - 0.5, fg.alpha(BORDER_OPACITY));
+                        row_separator(ui, x, w, ry);
                     }
-                    ui.text(Rect::new(x + 12.0, ry, w * 0.55, 40.0), *desc, TextStyle::Body, fg, Align::Start);
-                    keycaps(ui, keys, x + w - 12.0, ry + 8.0, fg);
+                    ui.text(Rect::new(x + 12.0, ry, w * 0.5, SHORTCUT_ROW), *desc, TextStyle::Body, fg, Align::Start);
+                    keycaps(ui, keys, x + w - 12.0, ry + (SHORTCUT_ROW - KEYCAP_H) / 2.0, fg);
                 }
                 y += list.h + 18.0;
             }
@@ -921,75 +1133,53 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
         }
         Dialog::About => {
             let f = dialog_frame(app, ui, width, content_h, None, false);
+            ui.cmds.push(Cmd::Clip(f.content));
             let r = f.content;
-            let mut y = r.y;
-            let icon = Rect::new(r.cx() - 48.0, y, 96.0, 96.0);
-            ui.fill(icon, 24.0, t.accent_bg);
-            ui.icon(Icon::Windmill, icon.centred(64.0, 64.0), t.accent_fg);
-            y += 96.0 + 18.0;
-            ui.text(Rect::new(r.x, y, r.w, 36.0), "Windmolen", TextStyle::Title1, fg, Align::Centre);
-            y += 38.0;
-            // The developer's name links to their profile, as in AdwAboutDialog.
-            let dev = crate::release::OWNER;
-            let dw = ui.text_width(dev, TextStyle::Body) + 24.0;
-            ui.button(
-                Rect::new(r.cx() - dw / 2.0, y, dw, 30.0),
-                Action::OpenProfile,
-                Content::Label(dev),
-                Style::Flat,
-                t.accent,
-                true,
-                false,
-                Some("GitHub Profile"),
-            );
-            y += 34.0;
-            let ver = concat!("Version ", env!("CARGO_PKG_VERSION"));
-            let vw = ui.text_width(ver, TextStyle::Caption) + 20.0;
-            let vr = Rect::new(r.cx() - vw / 2.0, y, vw, 24.0);
-            ui.fill(vr, 12.0, t.accent.alpha(0.1));
-            ui.text(vr, ver, TextStyle::Caption, t.accent, Align::Centre);
-            y += 38.0;
-            y += ui.paragraph(
-                r.x + 24.0,
-                y,
-                r.w - 48.0,
-                "A lean, fast photo viewer.\nBuilt in Rust on Direct2D and the Windows Imaging Component.",
-                TextStyle::Body,
-                fg,
-                Align::Centre,
-            );
-            y += 18.0;
-            let label = "Project Page";
-            let pw = ui.text_width(label, TextStyle::Body) + 34.0;
-            ui.button(
-                Rect::new(r.cx() - pw / 2.0, y, pw, BTN),
-                Action::OpenProject,
-                Content::Label(label),
-                Style::Normal,
-                fg,
-                true,
-                false,
-                Some(&crate::release::project_url()),
-            );
+            let mut y = r.y + 12.0 - f.scroll;
+            ui.cmds.push(Cmd::AppIcon(Rect::new(r.cx() - 64.0, y, 128.0, 128.0)));
+            y += 128.0 + 6.0;
+            ui.text(Rect::new(r.x, y, r.w, 34.0), "Windmolen", TextStyle::Title1, fg, Align::Centre);
+            y += 34.0 + 6.0;
+            ui.text(Rect::new(r.x, y, r.w, 20.0), crate::release::OWNER, TextStyle::Body, fg, Align::Centre);
+            y += 20.0 + 9.0;
+            // `.app-version`: an accent-coloured pill.
+            let ver = env!("CARGO_PKG_VERSION");
+            let vw = ui.text_width(ver, TextStyle::Heading) + 36.0;
+            let vr = Rect::new((r.cx() - vw / 2.0).round(), y, vw, 30.0);
+            ui.fill(vr, 15.0, t.accent.alpha(0.1));
+            ui.text(vr, ver, TextStyle::Heading, t.accent, Align::Centre);
+            y += 30.0 + 24.0;
+            let x = r.x + 12.0;
+            let w = r.w - 24.0;
+            for (title, action, url) in [
+                ("Website", Action::OpenProject, crate::release::project_url()),
+                ("Report an Issue", Action::ReportIssue, crate::release::issues_url()),
+            ] {
+                let list = Rect::new(x, y, w, ROW_MIN);
+                boxed_list(ui, list, t.dialog_bg);
+                link_row(ui, list, list, title, action, &url, fg);
+                y += ROW_MIN + 18.0;
+            }
+            ui.cmds.push(Cmd::Unclip);
         }
         Dialog::ManageMarks => {
             let f = dialog_frame(app, ui, width, content_h, Some("Manage Marks"), false);
             ui.cmds.push(Cmd::Clip(f.content));
-            let x = f.content.x + 24.0;
-            let w = f.content.w - 48.0;
+            let x = f.content.x + PAGE_MARGIN;
+            let w = f.content.w - 2.0 * PAGE_MARGIN;
             let mut y = f.content.y + 6.0 - f.scroll;
             y += ui.paragraph(x, y, w, MARKS_INTRO, TextStyle::Body, fg.alpha(DIM_OPACITY), Align::Start) + 18.0;
             let list = Rect::new(x, y, w, SLOTS as f32 * ROW_H);
-            boxed_list(ui, list);
+            boxed_list(ui, list, t.dialog_bg);
             let counts = app.settings.counts();
             for slot in 0..SLOTS {
                 let ry = y + slot as f32 * ROW_H;
                 if slot > 0 {
-                    ui.hline(x, x + w, ry - 0.5, fg.alpha(BORDER_OPACITY));
+                    row_separator(ui, x, w, ry);
                 }
-                ui.fill(Rect::new(x + 14.0, ry + ROW_H / 2.0 - 7.0, 14.0, 14.0), 7.0, ACCENTS[slot]);
+                ui.fill(Rect::new(x + ROW_INSET, ry + ROW_H / 2.0 - 7.0, 14.0, 14.0), 7.0, ACCENTS[slot]);
                 let dir = app.settings.mark_dirs[slot].as_deref();
-                let mut right = x + w - 12.0;
+                let mut right = x + w - ROW_INSET;
                 let by = ry + (ROW_H - BTN) / 2.0;
                 if dir.is_some() {
                     right -= BTN;
@@ -1000,36 +1190,54 @@ fn dialog(app: &App, ui: &mut Ui, d: Dialog) {
                 right -= BTN;
                 let b = Rect::new(right, by, BTN, BTN);
                 ui.button(b, Action::PickMarkDir(slot as u8), Content::Icon(Icon::Folder), Style::Flat, fg, true, false, Some("Choose Folder…"));
-                right -= 12.0;
+                right -= 6.0;
                 if counts[slot] > 0 {
                     let s = format!("{} marked", counts[slot]);
                     let cw = ui.text_width(&s, TextStyle::Caption);
                     ui.text(Rect::new(right - cw, ry, cw + 1.0, ROW_H), s, TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::End);
-                    right -= cw + 12.0;
+                    right -= cw + 6.0;
                 }
-                let tx = x + 40.0;
+                let tx = x + ROW_INSET + 14.0 + 6.0;
                 let tw = (right - tx).max(0.0);
                 let title = match app.mark_label(slot) {
                     Some(l) => format!("{}  ·  {l}", slot + 1),
                     None => format!("{}", slot + 1),
                 };
-                ui.text(Rect::new(tx, ry + 9.0, tw, 22.0), title, TextStyle::Body, fg, Align::Start);
+                ui.text(Rect::new(tx, ry + 8.0, tw, 20.0), title, TextStyle::Body, fg, Align::Start);
                 let sub = dir.map_or_else(|| "No folder chosen".to_owned(), |d| d.display().to_string());
-                ui.text(Rect::new(tx, ry + 30.0, tw, 18.0), sub, TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Start);
+                ui.text(Rect::new(tx, ry + 31.0, tw, 17.0), sub, TextStyle::Caption, fg.alpha(DIM_OPACITY), Align::Start);
             }
             ui.cmds.push(Cmd::Unclip);
         }
     }
 }
 
+/// `shortcut-label`: each key a keycap, alternatives split by a dimmed slash.
+const KEYCAP_H: f32 = 30.0;
+
 fn keycaps(ui: &mut Ui, keys: &str, right: f32, y: f32, fg: Color) {
+    let t = ui.t;
     let mut x = right;
-    for part in keys.split(" / ").collect::<Vec<_>>().into_iter().rev() {
-        let w = ui.text_width(part, TextStyle::Caption) + 14.0;
-        x -= w;
-        let r = Rect::new(x, y, w, 24.0);
-        ui.fill(r, 6.0, fg.alpha(0.1));
-        ui.text(r, part, TextStyle::Caption, fg, Align::Centre);
-        x -= 6.0;
+    let alternatives: Vec<&str> = keys.split(" / ").collect();
+    for (i, alt) in alternatives.iter().enumerate().rev() {
+        let parts: Vec<&str> = if alt.len() > 1 && alt.contains('+') && !alt.ends_with('+') { alt.split('+').collect() } else { vec![alt] };
+        for part in parts.into_iter().rev() {
+            let w = (ui.text_width(part, TextStyle::Body) + 12.0).max(32.0);
+            x -= w;
+            let r = Rect::new(x, y, w, KEYCAP_H);
+            ui.fill(r, 6.0, fg.alpha(0.1));
+            // inset 0 -2px card-shade: a lip along the bottom.
+            ui.cmds.push(Cmd::Clip(Rect::new(r.x, r.bottom() - 2.0, r.w, 2.0)));
+            ui.fill(r, 6.0, t.card_shade);
+            ui.cmds.push(Cmd::Unclip);
+            ui.text(r, part, TextStyle::Body, fg, Align::Centre);
+            x -= 6.0;
+        }
+        if i > 0 {
+            let sw = ui.text_width("/", TextStyle::Body);
+            x -= sw;
+            ui.text(Rect::new(x, y, sw + 1.0, KEYCAP_H), "/", TextStyle::Body, fg.alpha(DIM_OPACITY), Align::Start);
+            x -= 6.0;
+        }
     }
 }

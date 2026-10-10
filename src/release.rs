@@ -10,12 +10,12 @@
 pub const OWNER: &str = "professional-cynic";
 pub const REPO: &str = "windmolen";
 
-pub fn profile_url() -> String {
-    format!("https://github.com/{OWNER}")
-}
-
 pub fn project_url() -> String {
     format!("https://github.com/{OWNER}/{REPO}")
+}
+
+pub fn issues_url() -> String {
+    format!("https://github.com/{OWNER}/{REPO}/issues")
 }
 
 /// Path on github.com of an asset of the latest release.

@@ -164,7 +164,12 @@ struct Target {
     rt: ID2D1HwndRenderTarget,
     dc: ID2D1DeviceContext,
     brush: ID2D1SolidColorBrush,
+    /// The application icon, uploaded when first drawn.
+    app_icon: Option<ID2D1Bitmap>,
 }
+
+/// The application icon, as Explorer and the taskbar show it.
+pub static APP_ICON_PNG: &[u8] = include_bytes!("../res/windmolen.png");
 
 pub struct Renderer {
     factory: ID2D1Factory1,
@@ -237,7 +242,7 @@ impl Renderer {
                 rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
                 let dc: ID2D1DeviceContext = rt.cast()?;
                 let brush = rt.CreateSolidColorBrush(&color(Color::BLACK), None)?;
-                self.target = Some(Target { rt, dc, brush });
+                self.target = Some(Target { rt, dc, brush, app_icon: None });
             }
         }
         Ok(self.target.as_ref().expect("target was just created"))
@@ -284,6 +289,12 @@ impl Renderer {
             rt.EndDraw(None, None)?;
             rt.GetBitmap()
         }
+    }
+
+    fn app_icon(&mut self, win: (u32, u32)) -> Option<ID2D1Bitmap> {
+        let wic = crate::wic::Wic::new().ok()?;
+        let (w, h, pixels) = crate::wic::decode_bytes(&wic.0, APP_ICON_PNG).ok()?;
+        self.bitmap((w, h), win, &pixels).ok()
     }
 
     fn icon_geometry(&mut self, icon: Icon) -> Result<Vec<(ID2D1PathGeometry, Paint)>> {
@@ -348,6 +359,12 @@ impl Renderer {
         for c in cmds {
             if let Cmd::Icon { icon, .. } = c {
                 self.icon_geometry(*icon)?;
+            }
+        }
+        if cmds.iter().any(|c| matches!(c, Cmd::AppIcon(_))) && self.target(size.0, size.1)?.app_icon.is_none() {
+            let icon = self.app_icon(size);
+            if let Some(t) = self.target.as_mut() {
+                t.app_icon = icon;
             }
         }
         let t = self.target(size.0, size.1)?.clone();
@@ -415,6 +432,23 @@ impl Renderer {
                         if let Ok(g) = self.path(&seg, false) {
                             brush.SetColor(&color(*c));
                             rt.DrawGeometry(&g, brush, *w, &self.round);
+                        }
+                    }
+                    Cmd::Polygon { points, c } => {
+                        let segs: Vec<Seg> = points
+                            .iter()
+                            .enumerate()
+                            .map(|(i, &(x, y))| if i == 0 { Seg::Move(x, y) } else { Seg::Line(x, y) })
+                            .chain([Seg::Close])
+                            .collect();
+                        if let Ok(g) = self.path(&segs, true) {
+                            brush.SetColor(&color(*c));
+                            rt.FillGeometry(&g, brush, None);
+                        }
+                    }
+                    Cmd::AppIcon(r) => {
+                        if let Some(b) = &t.app_icon {
+                            dc.DrawBitmap(b, Some(&rect(*r)), 1.0, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, None, None);
                         }
                     }
                     Cmd::Clip(r) => rt.PushAxisAlignedClip(&rect(*r), D2D1_ANTIALIAS_MODE_ALIASED),

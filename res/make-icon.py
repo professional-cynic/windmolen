@@ -4,8 +4,9 @@
 # ///
 """Renders the Windmolen app icon (256×256 RGBA PNG) without dependencies.
 
-A Dutch windmill on a hill under a blue sky, in the GNOME icon style and
-the GNOME palette. Shapes are sampled 4×4 per pixel for anti-aliasing.
+A Dutch windmill on a hill under a blue sky, in flat shapes and the
+GNOME palette: a tapered brown body with a gallery, a dark cap and four
+white sails. Shapes are sampled 4×4 per pixel for anti-aliasing.
 
 Usage: uv run res/make-icon.py res/windmolen.png
 """
@@ -24,8 +25,9 @@ def hexc(v):
 
 SKY_TOP, SKY_BOTTOM = hexc(0x3584E4), hexc(0x99C1F1)
 HILL, HILL_LIGHT = hexc(0x26A269), hexc(0x33D17A)
-TOWER, TOWER_SHADE = hexc(0xDEDDDA), hexc(0xC0BFBC)
-CAP, DOOR, STOCK = hexc(0xC01C28), hexc(0x5E5C64), hexc(0x3D3846)
+# Brown 3 and 4: the lit and shaded halves of the body; brown 5 for wood.
+TOWER, TOWER_SHADE = hexc(0x986A44), hexc(0x865E3C)
+CAP, DOOR, STOCK = hexc(0x63452C), hexc(0x63452C), hexc(0x4A3320)
 SAIL = hexc(0xFFFFFF)
 
 HUB = (128.0, 104.0)
@@ -65,7 +67,8 @@ STOCKS = [bar(a, 0, 84, -3, 3) for a in ARMS]
 LATTICE = [bar(a, r, r + 3, 3, 26) for a in ARMS for r in (36, 58)]
 TOWER_PTS = [(102, 214), (154, 214), (142, 112), (114, 112)]
 TOWER_LIT = [(128, 214), (154, 214), (142, 112), (128, 112)]
-CAP_PTS = [(110, 116), (146, 116), (138, 94), (118, 94)]
+CAP_PTS = [(108, 116), (148, 116), (140, 96), (116, 96)]
+GALLERY_PTS = [(92, 162), (164, 162), (164, 170), (92, 170)]
 DOOR_PTS = [(121, 214), (135, 214), (135, 196), (128, 189), (121, 196)]
 
 
@@ -78,7 +81,7 @@ def colour(x, y):
         c = HILL
     if in_poly(x, y, TOWER_PTS):
         c = TOWER_SHADE if in_poly(x, y, TOWER_LIT) else TOWER
-    if in_poly(x, y, DOOR_PTS):
+    if in_poly(x, y, DOOR_PTS) or in_poly(x, y, GALLERY_PTS):
         c = DOOR
     if any(in_poly(x, y, s) for s in SAILS):
         c = SAIL

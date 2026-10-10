@@ -114,10 +114,14 @@ pub struct Theme {
     pub dialog_bg: Color,
     pub popover_bg: Color,
     pub sidebar_bg: Color,
+    pub sidebar_backdrop: Color,
+    pub sidebar_border: Color,
     pub accent_bg: Color,
     pub accent_fg: Color,
+    /// The accent as a foreground colour on window backgrounds.
     pub accent: Color,
-    pub destructive_bg: Color,
+    /// Red text and tints of destructive buttons.
+    pub destructive: Color,
     pub osd_bg: Color,
     pub osd_fg: Color,
     pub dimming: Color,
@@ -126,12 +130,22 @@ pub struct Theme {
 pub const DIM_OPACITY: f32 = 0.55;
 pub const BORDER_OPACITY: f32 = 0.15;
 pub const DISABLED_OPACITY: f32 = 0.5;
+/// Disabled flat buttons fade further, having no background to dim.
+pub const STRONG_DISABLED_OPACITY: f32 = 0.3;
+
+/// libadwaita's `--standalone-color-oklab`: the lightness at which a
+/// background colour also reads as text on the window background.
+fn standalone(bg: Color, dark: bool) -> Color {
+    let lab = bg.to_oklab();
+    let l = if dark { lab[0].max(0.85) } else { lab[0].min(0.5) };
+    Color::from_oklab([l, lab[1], lab[2]], 1.0)
+}
 
 impl Theme {
     pub fn new(dark: bool, accent_bg: Color) -> Self {
-        let lab = accent_bg.to_oklab();
-        let standalone = if dark { lab[0].max(0.85) } else { lab[0].min(0.5) };
-        let accent = Color::from_oklab([standalone, lab[1], lab[2]], 1.0);
+        let accent = standalone(accent_bg, dark);
+        // --destructive-bg-color: red 3 (light) and red 4 (dark).
+        let destructive = standalone(Color::hex(if dark { 0xc01c28 } else { 0xe01b24 }), dark);
         let fg_light = Color::rgba(0, 0, 6, 0.8);
         if dark {
             Self {
@@ -147,13 +161,16 @@ impl Theme {
                 card_shade: Color::rgba(0, 0, 6, 0.36),
                 dialog_bg: Color::hex(0x36363a),
                 popover_bg: Color::hex(0x36363a),
-                sidebar_bg: Color::hex(0x28282c),
+                sidebar_bg: Color::hex(0x2e2e32),
+                sidebar_backdrop: Color::hex(0x28282c),
+                sidebar_border: Color::rgba(0, 0, 6, 0.36),
                 accent_bg,
                 accent_fg: Color::WHITE,
                 accent,
-                destructive_bg: Color::hex(0xc01c28),
-                osd_bg: Color::rgba(0, 0, 6, 0.7),
-                osd_fg: Color::WHITE,
+                destructive,
+                osd_bg: Color::rgba(0, 0, 0, 0.7),
+                osd_fg: Color::rgba(255, 255, 255, 0.9),
+                // --shade-color at twice its opacity.
                 dimming: Color::rgba(0, 0, 6, 0.5),
             }
         } else {
@@ -170,14 +187,16 @@ impl Theme {
                 card_shade: Color::rgba(0, 0, 6, 0.07),
                 dialog_bg: Color::hex(0xfafafb),
                 popover_bg: Color::WHITE,
-                sidebar_bg: Color::hex(0xf3f3f5),
+                sidebar_bg: Color::hex(0xebebed),
+                sidebar_backdrop: Color::hex(0xf2f2f4),
+                sidebar_border: Color::rgba(0, 0, 6, 0.07),
                 accent_bg,
                 accent_fg: Color::WHITE,
                 accent,
-                destructive_bg: Color::hex(0xe01b24),
-                osd_bg: Color::rgba(0, 0, 6, 0.7),
-                osd_fg: Color::WHITE,
-                dimming: Color::rgba(0, 0, 6, 0.25),
+                destructive,
+                osd_bg: Color::rgba(0, 0, 0, 0.7),
+                osd_fg: Color::rgba(255, 255, 255, 0.9),
+                dimming: Color::rgba(0, 0, 6, 0.14),
             }
         }
     }
@@ -196,6 +215,9 @@ mod tests {
         };
         assert!(near(Theme::new(false, ACCENTS[0]).accent, 0x0461be));
         assert!(near(Theme::new(true, ACCENTS[0]).accent, 0x81d0ff));
+        // And #c30000 / #ff938c for the destructive colour.
+        assert!(near(Theme::new(false, ACCENTS[0]).destructive, 0xc30000));
+        assert!(near(Theme::new(true, ACCENTS[0]).destructive, 0xff938c));
     }
 
     #[test]
