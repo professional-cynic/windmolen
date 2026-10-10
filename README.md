@@ -124,11 +124,13 @@ offline code signing (Authenticode), which needs a certificate.
 ## Releasing
 
 1. Bump `version` in `Cargo.toml` (`MAJOR.MINOR.PATCH`), commit and push.
-2. `git tag v0.2.0 && git push origin v0.2.0`
+2. Either `git tag v0.2.0 && git push origin v0.2.0`, or open the **Release** workflow
+   in the Actions tab and press **Run workflow** on `main`, which creates the tag.
 
-`.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, runs the
-tests, builds with MSVC (manifest and Explorer icon included), attests the build
-and publishes `windmolen.exe` and `latest.txt` as a GitHub Release.
+`.github/workflows/release.yml` checks that the tag matches `Cargo.toml` (or, when
+started by hand, that the version is not tagged yet), runs the tests, builds with
+MSVC (manifest and Explorer icon included), attests the build and publishes
+`windmolen.exe` and `latest.txt` as a GitHub Release.
 `ci.yml` runs Clippy and the tests on every push to `main`.
 
 ## Keyboard

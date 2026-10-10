@@ -1,6 +1,6 @@
-# Publishes a release when a version tag is pushed:
-#   1. bump `version` in Cargo.toml and commit
-#   2. git tag v0.2.0 && git push origin v0.2.0
+# Publishes a release of the version in Cargo.toml (bump it and commit first):
+#   - push a tag: git tag v0.2.0 && git push origin v0.2.0
+#   - or press "Run workflow" on main in the Actions tab, which creates the tag.
 #
 # The release carries windmolen.exe and latest.txt (version + SHA-256),
 # which the app's updater reads.
@@ -9,6 +9,7 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: write # create the release
@@ -18,8 +19,6 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
-    env:
-      TAG: ${{ github.ref_name }}
     steps:
       # Pinned to a commit; persist-credentials: false keeps the token out of
       # .git/config, where later steps (build scripts included) could read it.
@@ -27,12 +26,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check the tag matches Cargo.toml
+      - name: Work out the version and tag
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(\d+\.\d+\.\d+)"$' | Select-Object -First 1).Matches[0].Groups[1].Value
-          if ("v$version" -ne $env:TAG) { throw "Tag $env:TAG does not match Cargo.toml version $version" }
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            if ($env:GITHUB_REF_NAME -ne $tag) { throw "Tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version" }
+          } else {
+            # Started by hand: main only, and never a version released before.
+            if ($env:GITHUB_REF -ne "refs/heads/main") { throw "Releases are made from main" }
+            $refs = gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq ".[].ref"
+            if (@($refs) -contains "refs/tags/$tag") { throw "$tag is already tagged: bump the version in Cargo.toml first" }
+          }
           "VERSION=$version" >> $env:GITHUB_ENV
+          "TAG=$tag" >> $env:GITHUB_ENV
 
       - name: Update Rust
         run: rustup update stable --no-self-update
@@ -63,8 +73,12 @@ jobs:
         with:
           subject-path: dist/windmolen.exe
 
+      # A pushed tag already exists; started by hand, the release creates the
+      # tag on the commit that was built.
       - name: Publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:TAG dist/windmolen.exe dist/latest.txt --verify-tag --generate-notes --title "Windmolen $env:VERSION"
+        run: |
+          $at = if ($env:GITHUB_REF_TYPE -eq "tag") { "--verify-tag" } else { "--target=$env:GITHUB_SHA" }
+          gh release create $env:TAG dist/windmolen.exe dist/latest.txt $at --generate-notes --title "Windmolen $env:VERSION"
