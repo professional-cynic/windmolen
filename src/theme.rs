@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! libadwaita colour palette (1.6+ named colours) for light and dark styles.
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Pure editing model: orientation (the dihedral group D4) and cropping.
 //!
 //! Kept free of any platform code so it can be unit-tested anywhere.

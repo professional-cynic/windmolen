@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Thin, safe wrappers over the Win32 services the viewer needs: COM,
 //! shell dialogs, theme settings, locale formatting and file operations.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Updates from GitHub Releases over HTTPS (WinHTTP + Schannel), for the
 //! copy the installer put in place.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Symbolic icons drawn on a 16×16 grid, after the Adwaita icon set, plus a
 //! minimal SVG path-data parser (M L H V C Q A Z, absolute and relative).
 

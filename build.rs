@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Embeds the application manifest (asInvoker, per-monitor DPI v2, long
 //! paths) and, when a resource compiler is available, the Explorer icon.
 //!

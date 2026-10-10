@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Platform-independent formatting of image metadata.
 
 /// A metadata value as read from the container.

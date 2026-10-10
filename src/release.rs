@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Release manifest (`latest.txt`) and version comparison; pure and tested.
 //!
 //! The manifest is published next to each release's installer:

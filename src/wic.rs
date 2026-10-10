@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Image decoding and encoding through the Windows Imaging Component.
 //!
 //! WIC ships with Windows and is serviced by Windows Update; codecs from

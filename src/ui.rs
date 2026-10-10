@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Immediate-mode UI: the view emits draw commands and hit-test widgets in
 //! one pass, so painting and input always agree. Styling follows libadwaita.
 

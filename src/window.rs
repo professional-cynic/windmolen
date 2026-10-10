@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! The Win32 window: client-side decorations (keeping Windows' resize
 //! borders, snap layouts and system menu), DPI handling and input routing.
 

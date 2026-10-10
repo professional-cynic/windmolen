@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Groups the files of one Explorer action into one window.
 //!
 //! For a multi-selection, Explorer starts one process per file almost at

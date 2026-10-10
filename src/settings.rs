@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Persistent settings and marks, stored as a small tab-separated UTF-8 file.
 //!
 //! Paths that are not valid Unicode are kept for the session but not saved.

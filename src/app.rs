@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Application state and behaviour. Platform calls that can re-enter the
 //! window procedure (dialogs, window placement) are returned as [`Effect`]s
 //! and run by the host after it has released its borrow of the app.

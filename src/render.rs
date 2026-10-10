@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Direct2D / DirectWrite back end that executes [`Cmd`] lists.
 
 use std::cell::RefCell;

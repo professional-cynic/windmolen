@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! Layout of every surface, following libadwaita's widgets and metrics:
 //! header bar, status pages, OSD controls, boxed lists, popover menus,
 //! dialogs and toasts.

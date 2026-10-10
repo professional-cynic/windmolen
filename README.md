@@ -219,3 +219,10 @@ path parser, metadata formatting) on any OS.
   Explorer itself and the Settings default-apps page can't be exercised under Wine. Wine 9 lacks WIC rotation
   (newer Wine has it) and JPEG metadata, so those paths, and the real DWM frame, still need a check on Windows;
   the order in which WIC flips and rotates is pinned by a unit test modelled on Wine's implementation.
+
+## License
+
+Copyright (C) 2026 professional-cynic
+
+Windmolen is free software, licensed under the GNU Affero General Public License
+v3.0. See [LICENSE](LICENSE).

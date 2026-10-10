@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 professional-cynic
+
 //! File-type registration, for the copy that the installer
 //! (`installer/windmolen.iss`) put in place: everything in HKCU, no
 //! administrator rights.

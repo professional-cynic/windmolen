@@ -42,6 +42,7 @@ SetupIconFile={#Icon}
 #endif
 UninstallDisplayIcon={app}\windmolen.exe
 UninstallDisplayName=Windmolen
+LicenseFile=..\LICENSE
 OutputBaseFilename=Windmolen-Setup
 Compression=lzma2/max
 SolidCompression=yes
