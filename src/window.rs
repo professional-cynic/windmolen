@@ -8,6 +8,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
@@ -29,6 +30,8 @@ struct Host {
     /// Placement to return to when leaving fullscreen.
     restore: Cell<Option<WINDOWPLACEMENT>>,
     tracking: Cell<bool>,
+    /// A shutdown block reason is registered.
+    blocking: Cell<bool>,
 }
 
 fn loword(v: usize) -> u16 {
@@ -92,6 +95,7 @@ pub fn run(args: Vec<PathBuf>) -> Result<()> {
             icons: Cell::new([None, None]),
             restore: Cell::new(None),
             tracking: Cell::new(false),
+            blocking: Cell::new(false),
         }));
         let scale = GetDpiForSystem() as f32 / 96.0;
         let hwnd = CreateWindowExW(
@@ -233,9 +237,22 @@ impl Host {
 
     /// Repaints if needed and arms the animation/deadline timer.
     fn after(&self, hwnd: HWND) {
-        let Some((dirty, wake)) = self.with(|a| (a.take_dirty(), a.next_wake())) else { return };
-        // SAFETY: invalidation and timers on our own window.
+        let Some((dirty, wake, work)) = self.with(|a| (a.take_dirty(), a.next_wake(), a.work_reason())) else { return };
+        // SAFETY: invalidation, timers and shutdown reasons of our own window.
         unsafe {
+            // While files are being written, Windows lists the app (and why)
+            // instead of ending it mid-write.
+            if work.is_some() != self.blocking.get() {
+                self.blocking.set(work.is_some());
+                match work {
+                    Some(what) => {
+                        let _ = ShutdownBlockReasonCreate(hwnd, &HSTRING::from(what));
+                    }
+                    None => {
+                        let _ = ShutdownBlockReasonDestroy(hwnd);
+                    }
+                }
+            }
             if dirty {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
@@ -645,6 +662,21 @@ impl Host {
                     }
                     self.save_placement(hwnd);
                     return def();
+                }
+                // Asked before Windows ends the session: not while files are
+                // being written (the user may still end it regardless).
+                WM_QUERYENDSESSION => {
+                    let busy = self.with(|a| a.busy()).unwrap_or(false);
+                    return LRESULT(isize::from(!busy));
+                }
+                WM_ENDSESSION => {
+                    if wp.0 != 0 {
+                        self.with(App::end_session);
+                        self.save_placement(hwnd);
+                        // The process ends soon: never in the middle of an update.
+                        std::mem::forget(update::hold_for_exit());
+                    }
+                    return LRESULT(0);
                 }
                 WM_DESTROY => {
                     let _ = KillTimer(Some(hwnd), TIMER);

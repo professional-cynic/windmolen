@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use windows::Win32::Foundation::{
@@ -464,17 +465,20 @@ pub struct SaveJob {
     pub crop: Option<(u32, u32, u32, u32)>,
 }
 
+/// The error of a save stopped through its `cancel` flag.
+const STOPPED: &str = "Stopped";
+
 /// Writes the edited image to `job.dst`, a temporary file owned by the
-/// caller (who also removes it on failure).
+/// caller (who also removes it on failure). Setting `cancel` stops it soon.
 ///
 /// A pure rotation of a JPEG or TIFF only rewrites the orientation tag
 /// (lossless); anything else is re-encoded from the original pixels.
-pub fn save(f: &IWICImagingFactory, job: &SaveJob) -> std::result::Result<(), String> {
+pub fn save(f: &IWICImagingFactory, job: &SaveJob, cancel: &AtomicBool) -> std::result::Result<(), String> {
     let lossless_container = job.container == GUID_ContainerFormatJpeg || job.container == GUID_ContainerFormatTiff;
-    if job.crop.is_none() && lossless_container && retag(f, job).is_ok() {
+    if job.crop.is_none() && lossless_container && retag(f, job, cancel).is_ok() {
         return Ok(());
     }
-    encode(f, job)
+    encode(f, job, cancel)
 }
 
 /// Adds the failing step to an error message.
@@ -500,9 +504,9 @@ fn orientation_variant(v: u16) -> PropVar {
 }
 
 /// Copies the file and changes only its orientation tag in place.
-fn retag(f: &IWICImagingFactory, job: &SaveJob) -> Result<()> {
-    std::fs::copy(&job.src, &job.dst).map_err(|_| windows::core::Error::empty())?;
+fn retag(f: &IWICImagingFactory, job: &SaveJob, cancel: &AtomicBool) -> Result<()> {
     let wide = HSTRING::from(job.dst.as_os_str());
+    crate::sys::copy_file(&HSTRING::from(job.src.as_os_str()), &wide, false, cancel)?;
     // SAFETY: COM calls on valid objects; the variant outlives the call.
     unsafe {
         (|| -> Result<()> {
@@ -524,7 +528,7 @@ fn transform_options(o: Orient) -> WICBitmapTransformOptions {
     if o.flip { WICBitmapTransformOptions(r.0 | WICBitmapTransformFlipHorizontal.0) } else { r }
 }
 
-fn encode(f: &IWICImagingFactory, job: &SaveJob) -> std::result::Result<(), String> {
+fn encode(f: &IWICImagingFactory, job: &SaveJob, cancel: &AtomicBool) -> std::result::Result<(), String> {
     let src_name = HSTRING::from(job.src.as_os_str());
     let dst_name = HSTRING::from(job.dst.as_os_str());
     // SAFETY: COM calls on valid objects; all pointers refer to locals that
@@ -589,7 +593,16 @@ fn encode(f: &IWICImagingFactory, job: &SaveJob) -> std::result::Result<(), Stri
             let _ = fe.SetColorContexts(&contexts);
         }
 
-        fe.WriteSource(&source, std::ptr::null()).ctx("write")?;
+        // In bands, which encoders accept as long as they add up to the
+        // height, so that a cancelled save stops promptly.
+        const BAND: u32 = 256;
+        for y in (0..h).step_by(BAND as usize) {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(STOPPED.into());
+            }
+            let band = WICRect { X: 0, Y: y as i32, Width: w as i32, Height: BAND.min(h - y) as i32 };
+            fe.WriteSource(&source, &band).ctx("write")?;
+        }
         fe.Commit().ctx("write")?;
         encoder.Commit().ctx("write")?;
         // File streams flush on release; Commit is optional for them.

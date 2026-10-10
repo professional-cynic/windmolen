@@ -117,7 +117,7 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         let whole = Rect::new(right, y, lw + aw, BTN);
         let main = Rect::new(right, y, lw, BTN);
         let arrow = Rect::new(right + lw, y, aw, BTN);
-        let enabled = !app.busy;
+        let enabled = !app.busy();
         let k = if enabled { 1.0 } else { 0.5 };
         ui.fill(whole, 6.0, t.accent_bg.alpha(k));
         for (part, action) in [(main, Action::EditSave), (arrow, Action::SaveMenu)] {
@@ -591,7 +591,7 @@ fn entry<'s>(action: Action, label: impl Into<String>, accel: Option<&'s str>) -
 
 fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
     const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    let can_send = !app.busy && app.settings.counts().iter().any(|&c| c > 0);
+    let can_send = !app.busy() && app.settings.counts().iter().any(|&c| c > 0);
     let (anchor, items, above): (Option<Rect>, Vec<Item>, bool) = match p {
         Popover::Main => {
             let mut v = vec![
@@ -666,7 +666,7 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
             (anchors.aspect, v, true)
         }
         Popover::Save => {
-            let replace = app.loaded().is_some_and(|l| l.meta.can_encode) && !app.busy;
+            let replace = app.loaded().is_some_and(|l| l.meta.can_encode) && !app.busy();
             (
                 anchors.save,
                 vec![

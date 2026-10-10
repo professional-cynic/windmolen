@@ -2,9 +2,10 @@
 //! shell dialogs, theme settings, locale formatting and file operations.
 
 use std::cmp::Ordering;
-use std::ffi::{OsStr, OsString};
+use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 
@@ -13,7 +14,10 @@ use windows::Win32::Foundation::{
     WPARAM,
 };
 use windows::Win32::Globalization::{DATE_SHORTDATE, GetDateFormatEx, GetTimeFormatEx, TIME_NOSECONDS};
-use windows::Win32::Storage::FileSystem::{CopyFileW, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACE_FILE_FLAGS, ReplaceFileW};
+use windows::Win32::Storage::FileSystem::{
+    COPY_FILE_FAIL_IF_EXISTS, COPYFILE_FLAGS, COPYPROGRESSROUTINE_PROGRESS, CopyFileExW, LPPROGRESS_ROUTINE_CALLBACK_REASON, MOVEFILE_COPY_ALLOWED,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, MoveFileWithProgressW, PROGRESS_CANCEL, PROGRESS_CONTINUE, REPLACE_FILE_FLAGS, ReplaceFileW,
+};
 use windows::Win32::System::Com::*;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
@@ -314,22 +318,48 @@ fn with_free_name(dir: &Path, stem: &OsStr, ext: Option<&OsStr>, mut op: impl Fn
     Err("Too many files with the same name".into())
 }
 
-/// Copies `src` into `dir`, choosing a free name.
-pub fn copy_into(src: &Path, dir: &Path) -> std::result::Result<PathBuf, String> {
-    let s = HSTRING::from(src.as_os_str());
-    with_free_name(dir, src.file_stem().unwrap_or_default(), src.extension(), |t| {
-        // SAFETY: NUL-terminated paths; `true` refuses to overwrite.
-        unsafe { CopyFileW(&s, t, true) }
-    })
+/// Called by Windows as a copy progresses: stops it once `cancel` (the
+/// `AtomicBool` that the pointer refers to) is set. Windows then deletes
+/// the partial copy; a move keeps its source.
+unsafe extern "system" fn progress(
+    _: i64,
+    _: i64,
+    _: i64,
+    _: i64,
+    _: u32,
+    _: LPPROGRESS_ROUTINE_CALLBACK_REASON,
+    _: HANDLE,
+    _: HANDLE,
+    cancel: *const c_void,
+) -> COPYPROGRESSROUTINE_PROGRESS {
+    // SAFETY: the caller passes a reference that outlives the copy.
+    let cancel = unsafe { &*cancel.cast::<AtomicBool>() };
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) { PROGRESS_CANCEL } else { PROGRESS_CONTINUE }
 }
 
-/// Moves `src` into `dir`, choosing a free name (copies across volumes).
-pub fn move_into(src: &Path, dir: &Path) -> std::result::Result<PathBuf, String> {
+/// Copies `src` to `dst`, stopping (and removing the partial copy) once
+/// `cancel` is set. With `exclusive`, an existing `dst` is never replaced.
+pub fn copy_file(src: &HSTRING, dst: &HSTRING, exclusive: bool, cancel: &AtomicBool) -> Result<()> {
+    let flags = if exclusive { COPY_FILE_FAIL_IF_EXISTS } else { COPYFILE_FLAGS(0) };
+    // SAFETY: NUL-terminated paths; `cancel` outlives the call.
+    unsafe { CopyFileExW(src, dst, Some(progress), Some(std::ptr::from_ref(cancel).cast()), None, flags) }
+}
+
+/// Copies `src` into `dir`, choosing a free name; see [`copy_file`].
+pub fn copy_into(src: &Path, dir: &Path, cancel: &AtomicBool) -> std::result::Result<PathBuf, String> {
+    let s = HSTRING::from(src.as_os_str());
+    with_free_name(dir, src.file_stem().unwrap_or_default(), src.extension(), |t| copy_file(&s, t, true, cancel))
+}
+
+/// Moves `src` into `dir`, choosing a free name. Across volumes it is a
+/// copy that `cancel` can stop, leaving `src` in place.
+pub fn move_into(src: &Path, dir: &Path, cancel: &AtomicBool) -> std::result::Result<PathBuf, String> {
     let s = HSTRING::from(src.as_os_str());
     with_free_name(dir, src.file_stem().unwrap_or_default(), src.extension(), |t| {
-        // SAFETY: NUL-terminated paths; without MOVEFILE_REPLACE_EXISTING
-        // the call fails instead of overwriting.
-        unsafe { MoveFileExW(&s, t, MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH) }
+        // SAFETY: NUL-terminated paths; `cancel` outlives the call. Without
+        // MOVEFILE_REPLACE_EXISTING the call fails instead of overwriting.
+        let cancel = Some(std::ptr::from_ref(cancel).cast());
+        unsafe { MoveFileWithProgressW(&s, t, Some(progress), cancel, MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH) }
     })
 }
 

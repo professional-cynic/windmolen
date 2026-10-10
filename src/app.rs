@@ -5,7 +5,10 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HWND;
@@ -152,6 +155,15 @@ pub enum SendMode {
     Move,
 }
 
+/// A save or send in progress: files are being written.
+struct Work {
+    /// What it does, as Windows shows it when the app delays a shutdown.
+    what: &'static str,
+    /// Set to stop it; half-written files are then removed.
+    cancel: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
+
 pub struct App {
     pub r: Renderer,
     pub exts: Vec<String>,
@@ -160,10 +172,9 @@ pub struct App {
     decoded: Receiver<Outcome>,
     tasks: Poster<TaskMsg>,
     task_rx: Receiver<TaskMsg>,
-    /// Saving or sending: files are being written.
-    pub busy: bool,
-    /// A close was asked for while busy; it happens once the work is done.
-    closing: bool,
+    work: Option<Work>,
+    /// Requests to close while `work` runs: see [`may_close`](Self::may_close).
+    close_requests: u8,
     /// Whether an installed copy exists, and whether this is it.
     pub installed: Option<bool>,
     pub update: UpdateState,
@@ -242,8 +253,8 @@ impl App {
             decoded,
             tasks: Poster::new(task_tx, hwnd, WM_TASK),
             task_rx,
-            busy: false,
-            closing: false,
+            work: None,
+            close_requests: 0,
             installed: None,
             update: UpdateState::Idle,
             settings,
@@ -746,7 +757,7 @@ impl App {
     // --------------------------------------------------------------------
 
     pub fn can_edit(&self) -> bool {
-        self.loaded().is_some_and(|l| l.meta.frames <= 1) && !self.busy
+        self.loaded().is_some_and(|l| l.meta.frames <= 1) && !self.busy()
     }
 
     fn enter_edit(&mut self, orient: Orient) {
@@ -825,13 +836,12 @@ impl App {
             }
         };
         let job = wic::SaveJob { src: src.clone(), dst: tmp.clone(), container, orient, crop };
-        self.busy = true;
         self.show_sticky("Saving…");
-        self.spawn(move |tx| {
+        self.start_work("Saving an image", move |tx, cancel| {
             let _com = sys::ComGuard::mta();
             let result = Wic::new()
                 .map_err(|e| wic::describe(&e))
-                .and_then(|w| wic::save(&w.0, &job))
+                .and_then(|w| wic::save(&w.0, &job, cancel))
                 .and_then(|()| if replace { sys::replace_with(&src, &tmp).map(|()| src.clone()) } else { sys::publish_copy(&tmp, &src, &ext) });
             if result.is_err() {
                 let _ = std::fs::remove_file(&tmp);
@@ -911,16 +921,18 @@ impl App {
         self.reload_settings();
         let dirs = self.settings.mark_dirs.clone();
         let items: Vec<_> = self.settings.marked();
-        if items.is_empty() || self.busy {
+        if items.is_empty() || self.busy() {
             return;
         }
-        self.busy = true;
         self.show_sticky(if mode == SendMode::Copy { "Copying…" } else { "Moving…" });
-        self.spawn(move |tx| {
+        self.start_work(if mode == SendMode::Copy { "Copying files" } else { "Moving files" }, move |tx, cancel| {
             let verb = if mode == SendMode::Copy { "Copying" } else { "Moving" };
             let (mut done, mut missing, mut failed) = (Vec::new(), Vec::new(), Vec::new());
             let total = items.len();
-            for (i, (folder, name, bits)) in items.into_iter().enumerate() {
+            'files: for (i, (folder, name, bits)) in items.into_iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
                 tx.send(TaskMsg::Progress(format!("{verb} {} of {total}…", i + 1)));
                 let src = folder.join(&name);
                 if !src.is_file() {
@@ -942,13 +954,20 @@ impl App {
                         if home.is_some() && std::fs::canonicalize(dest).ok() == home {
                             Ok(()) // Already in that folder.
                         } else if mode == SendMode::Move && last && ok {
-                            sys::move_into(&src, dest).map(drop)
+                            sys::move_into(&src, dest, cancel).map(drop)
                         } else {
-                            sys::copy_into(&src, dest).map(drop)
+                            sys::copy_into(&src, dest, cancel).map(drop)
                         }
                     });
                     match r {
                         Ok(()) => sent |= 1 << slot,
+                        // Stopped on request: Windows removed the partial copy.
+                        Err(_) if cancel.load(Ordering::Relaxed) => {
+                            if sent != 0 {
+                                done.push((folder, name, sent));
+                            }
+                            break 'files;
+                        }
                         Err(e) => {
                             ok = false;
                             failed.push(format!("{}: {e}", name.to_string_lossy()));
@@ -997,12 +1016,55 @@ impl App {
         std::thread::spawn(move || f(tx));
     }
 
+    /// Like [`spawn`](Self::spawn), for work that writes files: `f` stops
+    /// early once its flag is set. Its last message ends it.
+    fn start_work(&mut self, what: &'static str, f: impl FnOnce(Poster<TaskMsg>, &AtomicBool) + Send + 'static) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, flag) = (self.tasks.clone(), Arc::clone(&cancel));
+        let thread = std::thread::spawn(move || f(tx, &flag));
+        self.work = Some(Work { what, cancel, thread });
+        self.close_requests = 0;
+    }
+
+    /// Ends the current work; true when it was stopped on request.
+    fn finish_work(&mut self) -> bool {
+        self.work.take().is_some_and(|w| w.cancel.load(Ordering::Relaxed))
+    }
+
+    /// Saving or sending: files are being written.
+    pub fn busy(&self) -> bool {
+        self.work.is_some()
+    }
+
+    /// Why Windows should wait before ending the session, if it should.
+    pub fn work_reason(&self) -> Option<&'static str> {
+        self.work.as_ref().map(|w| w.what)
+    }
+
+    /// Windows is ending the session: stop the work, give it a moment to
+    /// remove half-written files, and record what it finished (such as the
+    /// marks of files already sent).
+    pub fn end_session(&mut self) {
+        if let Some(w) = &self.work {
+            w.cancel.store(true, Ordering::Relaxed);
+            let start = Instant::now();
+            while !w.thread.is_finished() && start.elapsed() < Duration::from_secs(3) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        let _ = self.on_task();
+    }
+
     pub fn on_task(&mut self) -> Vec<Effect> {
         let mut fx = Vec::new();
         while let Ok(m) = self.task_rx.try_recv() {
             match m {
                 TaskMsg::Progress(s) => {
-                    let s = if self.closing { format!("{s} Then closing.") } else { s };
+                    let s = match self.close_requests {
+                        0 => s,
+                        1 => format!("{s} Then closing."),
+                        _ => "Stopping…".into(),
+                    };
                     self.show_sticky(&s);
                 }
                 TaskMsg::Update { outcome, manual } => {
@@ -1018,7 +1080,7 @@ impl App {
                     }
                 }
                 TaskMsg::Sent { mode, done, missing, failed } => {
-                    self.busy = false;
+                    let stopped = self.finish_work();
                     self.update_settings(|st| {
                         for (dir, name, bits) in &done {
                             let left = st.marks(dir, name) & !bits;
@@ -1031,21 +1093,24 @@ impl App {
                     let verb = if mode == SendMode::Copy { "Copied" } else { "Moved" };
                     let n = done.len();
                     let files = if n == 1 { "file" } else { "files" };
-                    let msg = match failed.first() {
-                        None => format!("{verb} {n} {files}"),
-                        Some(e) => {
+                    let mut msg = format!("{verb} {n} {files}");
+                    if let Some(e) = failed.first() {
+                        msg += &format!(", {} failed — {e}", failed.len());
+                        if !stopped {
                             // Stay open so the failure is seen.
-                            self.closing = false;
-                            format!("{verb} {n} {files}, {} failed — {e}", failed.len())
+                            self.close_requests = 0;
                         }
-                    };
+                    }
+                    if stopped {
+                        msg += " before stopping";
+                    }
                     self.show_toast(&msg);
                     if mode == SendMode::Move {
                         fx.extend(self.rescan());
                     }
                 }
                 TaskMsg::Saved { result, replaced } => {
-                    self.busy = false;
+                    let stopped = self.finish_work();
                     match result {
                         Ok(p) => {
                             self.edit = None;
@@ -1061,31 +1126,38 @@ impl App {
                             }
                             fx.extend(self.rescan());
                         }
+                        Err(_) if stopped => self.show_toast("Saving stopped"),
                         Err(e) => {
                             // Stay open: the edit is still there to save again.
-                            self.closing = false;
+                            self.close_requests = 0;
                             self.show_toast(&format!("Could not save: {e}"));
                         }
                     }
                 }
             }
         }
-        if self.closing && !self.busy {
+        if self.close_requests > 0 && !self.busy() {
             fx.push(Effect::Close);
         }
         self.dirty = true;
         fx
     }
 
-    /// Whether the window may close now. While files are being written it
-    /// closes once they are done, so no half-written file is left behind;
-    /// asking again closes at once.
+    /// Whether the window may close now. While files are being written, a
+    /// first request waits for them, a second stops the work (half-written
+    /// files are removed) and closes when it has, and a third, for when
+    /// even stopping hangs (a lost network drive), closes at once.
     pub fn may_close(&mut self) -> bool {
-        if !self.busy || self.closing {
-            return true;
+        let Some(cancel) = self.work.as_ref().map(|w| Arc::clone(&w.cancel)) else { return true };
+        self.close_requests = self.close_requests.saturating_add(1);
+        match self.close_requests {
+            1 => self.show_sticky("Finishing… Close again to stop."),
+            2 => {
+                cancel.store(true, Ordering::Relaxed);
+                self.show_sticky("Stopping… Close again to quit at once.");
+            }
+            _ => return true,
         }
-        self.closing = true;
-        self.show_sticky("Finishing… Close again to stop now.");
         false
     }
 

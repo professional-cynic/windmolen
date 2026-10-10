@@ -109,8 +109,14 @@ offline code signing (Authenticode), which needs a certificate.
   to a portable copy (in Downloads, say) is never loaded. CI checks the flag.
   Builds made with the GNU toolchain lack this protection.
 - No file is overwritten unless you confirm **Replace Original**, which swaps the
-  file atomically. Closing waits until files being saved or sent are complete
-  (closing again stops at once), and never interrupts an update being put in place.
+  file atomically.
+- While an image is being saved or files sent, closing waits until they are complete.
+  Closing again stops the work cleanly: the file being written is removed, the
+  original stays, and marks are kept only for files not yet sent. A third close
+  quits at once, for when even stopping hangs (a lost network drive).
+- Windows waits for that work before shutting down, showing why. If you shut down
+  anyway, the work stops cleanly as above. Exiting never interrupts an update
+  being put in place.
 - A settings file that cannot be read is never saved over, so a passing read error
   cannot wipe your marks.
 
