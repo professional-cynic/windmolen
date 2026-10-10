@@ -36,6 +36,11 @@ fn main() {
     let quote = |p: &Path| p.display().to_string().replace('\\', "\\\\");
     let mut rc = format!("1 ICON \"{}\"\n", quote(&ico_path));
     if msvc {
+        // Resolve the program's own DLL imports (d2d1, dwrite, winhttp, …)
+        // from System32 only, never from the folder it runs in: a DLL planted
+        // next to a portable copy in Downloads would otherwise run with it.
+        // LOAD_LIBRARY_SEARCH_SYSTEM32; Windows 10 1607 and later.
+        println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
         // link.exe embeds the manifest itself.
         println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());

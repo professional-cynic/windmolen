@@ -282,8 +282,17 @@ pub fn uninstall() -> Result<(), String> {
         }
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let script = format!("/c ping -n 3 127.0.0.1 >nul & del /f /q \"{d}\\windmolen*.exe\" & rmdir \"{d}\"");
-        std::process::Command::new("cmd.exe").raw_arg(script).creation_flags(CREATE_NO_WINDOW).spawn().map_err(|e| e.to_string())?;
+        // System32's cmd by full path, started in System32: bare names are
+        // looked up in the program's (user-writable) folder or the current
+        // one first. /d skips AutoRun commands.
+        let system = sys::known_folder(&FOLDERID_System).ok_or("Could not find the system folder")?;
+        let script = format!("/d /c ping -n 3 127.0.0.1 >nul & del /f /q \"{d}\\windmolen*.exe\" & rmdir \"{d}\"");
+        std::process::Command::new(system.join("cmd.exe"))
+            .raw_arg(script)
+            .current_dir(&system)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     } else {
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for e in rd.flatten() {

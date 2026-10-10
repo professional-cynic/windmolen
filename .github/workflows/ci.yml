@@ -12,10 +12,40 @@ jobs:
   check:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a commit; persist-credentials: false keeps the token out of
+      # .git/config, where later steps (build scripts included) could read it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Update Rust
         run: rustup update stable --no-self-update && rustup component add clippy
       - name: Clippy
-        run: cargo clippy --release --locked -- -D warnings
+        run: cargo clippy --release --locked --all-targets -- -D warnings
       - name: Test
         run: cargo test --release --locked
+      # Links the program, so the manifest and linker flags are checked too.
+      - name: Build
+        run: cargo build --release --locked
+      # build.rs asks the linker to resolve DLL imports from System32 only;
+      # read DependentLoadFlags back from the PE load configuration.
+      - name: Check DLL search hardening
+        shell: pwsh
+        run: |
+          $b = [IO.File]::ReadAllBytes((Resolve-Path "target/release/windmolen.exe"))
+          $pe = [BitConverter]::ToInt32($b, 0x3C)
+          $sections = [BitConverter]::ToUInt16($b, $pe + 6)
+          $opt = $pe + 24
+          $table = $opt + [BitConverter]::ToUInt16($b, $pe + 20)
+          $rva = [BitConverter]::ToUInt32($b, $opt + 112 + 10 * 8)  # PE32+ load config directory
+          $off = $null
+          for ($i = 0; $i -lt $sections; $i++) {
+            $s = $table + 40 * $i
+            $va = [BitConverter]::ToUInt32($b, $s + 12)
+            if ($rva -ge $va -and $rva -lt $va + [BitConverter]::ToUInt32($b, $s + 16)) {
+              $off = [BitConverter]::ToUInt32($b, $s + 20) + $rva - $va
+            }
+          }
+          if ($rva -eq 0 -or $null -eq $off -or [BitConverter]::ToUInt32($b, $off) -lt 80) { throw "No load configuration with DependentLoadFlags" }
+          $flags = [BitConverter]::ToUInt16($b, $off + 78)
+          if ($flags -ne 0x800) { throw ("DependentLoadFlags is 0x{0:X}, expected 0x800" -f $flags) }
+          "DependentLoadFlags: 0x{0:X}" -f $flags
