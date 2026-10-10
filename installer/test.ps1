@@ -14,7 +14,15 @@ $checks = [ordered]@{
   "Default apps entry" = { $null -ne (Get-ItemProperty "HKCU:\Software\RegisteredApplications" -ErrorAction SilentlyContinue).Windmolen }
 }
 
-$p = Start-Process (Join-Path $root "dist\Windmolen-Setup.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+# Waits for that process only: Start-Process -Wait would also wait for any
+# program it starts, such as Windmolen after an update.
+function Run($file, $arguments) {
+  $p = Start-Process $file -ArgumentList $arguments -PassThru
+  $p.WaitForExit()
+  $p
+}
+
+$p = Run (Join-Path $root "dist\Windmolen-Setup.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 if ($p.ExitCode -ne 0) { throw "Setup failed with exit code $($p.ExitCode)" }
 foreach ($c in $checks.GetEnumerator()) {
   if (-not (& $c.Value)) { throw "After installing, missing: $($c.Key)" }
@@ -28,7 +36,7 @@ $exe = Join-Path $app "windmolen.exe"
 $old = Start-Process $exe -PassThru
 Start-Sleep 5
 if ($old.HasExited) { throw "Windmolen did not stay open before the update" }
-$p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/UPDATE=1" -Wait -PassThru
+$p = Run $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/UPDATE=1")
 if ($p.ExitCode -ne 0) { throw "The update failed with exit code $($p.ExitCode)" }
 if (-not $old.WaitForExit(30000)) { throw "The update did not close the running copy" }
 Start-Sleep 5
@@ -40,7 +48,7 @@ Start-Sleep 2
 
 # The uninstaller hands over to a copy of itself and returns at once: wait
 # until its entry is gone.
-Start-Process (Join-Path $app "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+$null = Run (Join-Path $app "unins000.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 for ($i = 0; $i -lt 60 -and (Test-Path $uninstallKey); $i++) { Start-Sleep 1 }
 Start-Sleep 2
 foreach ($c in $checks.GetEnumerator()) {
