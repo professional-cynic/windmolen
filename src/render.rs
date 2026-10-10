@@ -336,7 +336,14 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, size: (u32, u32), clear: Color, cmds: &[Cmd], image: Option<&ID2D1Bitmap>) -> Result<Frame> {
+    pub fn render(
+        &mut self,
+        size: (u32, u32),
+        clear: Color,
+        cmds: &[Cmd],
+        image: Option<&ID2D1Bitmap>,
+        preview: Option<&ID2D1Bitmap>,
+    ) -> Result<Frame> {
         // Build icon geometries before borrowing the target.
         for c in cmds {
             if let Cmd::Icon { icon, .. } = c {
@@ -390,8 +397,8 @@ impl Renderer {
                         }
                         rt.SetTransform(&id);
                     }
-                    Cmd::Image { m, smooth } => {
-                        if let Some(b) = image {
+                    Cmd::Image { m, smooth, preview: p } => {
+                        if let Some(b) = if *p { preview } else { image } {
                             dc.SetTransform(&matrix(*m));
                             let mode = if *smooth { D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC } else { D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR };
                             dc.DrawBitmap(b, None, 1.0, mode, None, None);

@@ -31,7 +31,8 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 - Open a file (or drop it on the window) and browse its folder in Explorer's natural order.
 - Zoom with the mouse wheel or touchpad pinch, anchored at the cursor. Animated
   zoom; double-click toggles best fit / 100 %. Drag to pan. Neighbouring images are pre-decoded at screen size; only the image
-  on screen is kept at full size, for zooming.
+  on screen is kept at full size, for zooming, and it is drawn from a screen-sized
+  copy until you zoom past it, so redrawing costs the same for any photo size.
 - Properties sidebar: file, dimensions, colour profile, camera, lens, exposure, aperture, ISO, focal length, date taken.
 - Editing: rotate, flip and crop (free or fixed aspect ratios).
   - **Save Copy** writes `name (edited).ext`.

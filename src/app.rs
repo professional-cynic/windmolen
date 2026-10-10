@@ -70,15 +70,36 @@ pub enum UpdateState {
     Ready(String),
 }
 
+/// A bitmap on the GPU and its size in pixels.
+#[derive(Clone)]
+pub struct Bitmap {
+    pub b: ID2D1Bitmap,
+    pub w: u32,
+    pub h: u32,
+}
+
 pub struct Loaded {
-    pub bitmap: ID2D1Bitmap,
-    /// Bitmap pixel size (may be smaller than the source).
-    pub bw: u32,
-    pub bh: u32,
+    /// The best bitmap so far (may be smaller than the source).
+    pub bitmap: Bitmap,
+    /// A screen-sized copy of a larger `bitmap`, drawn while it still has a
+    /// pixel for each one on screen: every frame then filters a few
+    /// megapixels instead of the whole photo.
+    pub preview: Option<Bitmap>,
     pub meta: Meta,
     /// No better bitmap is needed or possible: decoded at its own size or
     /// at the device maximum, or an attempt to do so failed.
     pub full: bool,
+}
+
+impl Loaded {
+    /// What to draw at `px` device pixels per source pixel, and whether
+    /// that is the preview.
+    pub fn pick(&self, px: f32) -> (&Bitmap, bool) {
+        match &self.preview {
+            Some(p) if px * self.meta.width as f32 <= p.w as f32 * 1.001 => (p, true),
+            _ => (&self.bitmap, false),
+        }
+    }
 }
 
 pub enum Slot {
@@ -615,9 +636,10 @@ impl App {
         self.r.max_bitmap(self.size.0, self.size.1)
     }
 
-    /// Keeps the current image at full size (for zooming) and its neighbours
-    /// at screen size (for instant browsing), and asks the decoder for what
-    /// is missing. Only one full-size bitmap is held at a time.
+    /// Keeps the current image at full size (for zooming) with a screen-sized
+    /// preview (for drawing), its neighbours at screen size only (for
+    /// instant browsing), and asks the decoder for what is missing. Only one
+    /// full-size bitmap is held at a time.
     fn request_decodes(&mut self) {
         // Collect finished work first, so none of it is requested again.
         self.collect_decoded();
@@ -626,7 +648,10 @@ impl App {
         let full = self.full_edge();
         let screen = self.screen_edge.clamp(256, full);
         for p in wanted.iter().skip(1) {
-            self.shrink(p, screen);
+            self.reduce(p, screen);
+        }
+        if let Some(cur) = wanted.first() {
+            self.add_preview(cur, screen);
         }
         let mut jobs: Vec<Job> = wanted
             .iter()
@@ -643,15 +668,34 @@ impl App {
         self.decoder.request(jobs);
     }
 
-    /// Replaces a bitmap larger than `edge` with a copy scaled on the GPU.
-    fn shrink(&mut self, path: &Path, edge: u32) {
+    /// Keeps only a screen-sized bitmap of a neighbour: its preview, or a
+    /// copy of a bitmap larger than `edge` scaled on the GPU.
+    fn reduce(&mut self, path: &Path, edge: u32) {
         let Some(Slot::Ready(l)) = self.cache.get_mut(path) else { return };
-        let (w, h) = crate::geom::fit_edge(l.bw, l.bh, edge);
-        if (w, h) == (l.bw, l.bh) {
+        let small = match l.preview.take() {
+            Some(p) => p,
+            None => {
+                let (w, h) = crate::geom::fit_edge(l.bitmap.w, l.bitmap.h, edge);
+                if (w, h) == (l.bitmap.w, l.bitmap.h) {
+                    return;
+                }
+                let Ok(b) = self.r.shrink(&l.bitmap.b, (w, h), self.size) else { return };
+                Bitmap { b, w, h }
+            }
+        };
+        l.bitmap = small;
+        l.full = false;
+    }
+
+    /// Gives a bitmap larger than `edge` a preview, scaled on the GPU.
+    fn add_preview(&mut self, path: &Path, edge: u32) {
+        let Some(Slot::Ready(l)) = self.cache.get_mut(path) else { return };
+        let (w, h) = crate::geom::fit_edge(l.bitmap.w, l.bitmap.h, edge);
+        if l.preview.is_some() || (w, h) == (l.bitmap.w, l.bitmap.h) {
             return;
         }
-        if let Ok(bitmap) = self.r.shrink(&l.bitmap, (w, h), self.size) {
-            *l = Loaded { bitmap, bw: w, bh: h, meta: l.meta.clone(), full: false };
+        if let Ok(b) = self.r.shrink(&l.bitmap.b, (w, h), self.size) {
+            l.preview = Some(Bitmap { b, w, h });
         }
     }
 
@@ -670,14 +714,21 @@ impl App {
             }
             let loaded = result.and_then(|d| {
                 let full = job.max_edge >= full_edge || (d.w, d.h) == (d.meta.width, d.meta.height);
-                let bitmap = self.r.bitmap((d.w, d.h), self.size, &d.pixels).map_err(|e| wic::describe(&e))?;
-                Ok(Loaded { bitmap, bw: d.w, bh: d.h, meta: d.meta, full })
+                let b = self.r.bitmap((d.w, d.h), self.size, &d.pixels).map_err(|e| wic::describe(&e))?;
+                Ok(Loaded { bitmap: Bitmap { b, w: d.w, h: d.h }, preview: None, meta: d.meta, full })
             });
             match (self.cache.get_mut(&job.path), loaded) {
                 // A preview never replaces a full-size bitmap.
                 (Some(Slot::Ready(old)), Ok(new)) if old.full && !new.full => {}
                 // When the full size cannot be had, the preview has to do.
                 (Some(Slot::Ready(old)), Err(_)) => old.full = true,
+                // The smaller bitmap that the full size replaces becomes its preview.
+                (Some(Slot::Ready(old)), Ok(mut new)) => {
+                    if old.bitmap.w < new.bitmap.w {
+                        new.preview = Some(old.bitmap.clone());
+                    }
+                    *old = new;
+                }
                 (_, new) => {
                     self.cache.insert(job.path, new.map_or_else(Slot::Failed, Slot::Ready));
                 }
@@ -1312,9 +1363,9 @@ impl App {
     pub fn paint(&mut self) {
         self.tick();
         let ui = view::build(self);
-        let bitmap = self.loaded().map(|l| l.bitmap.clone());
+        let (image, preview) = self.loaded().map_or((None, None), |l| (Some(l.bitmap.b.clone()), l.preview.as_ref().map(|p| p.b.clone())));
         let clear = self.theme.view_bg;
-        match self.r.render(self.size, clear, &ui.cmds, bitmap.as_ref()) {
+        match self.r.render(self.size, clear, &ui.cmds, image.as_ref(), preview.as_ref()) {
             Ok(Frame::Ok) => {}
             Ok(Frame::DeviceLost) => self.device_lost(),
             Err(_) => self.device_lost(),

@@ -129,6 +129,8 @@ pub enum Cmd {
     Image {
         m: Affine,
         smooth: bool,
+        /// From its screen-sized preview rather than its full bitmap.
+        preview: bool,
     },
     Arc {
         cx: f32,

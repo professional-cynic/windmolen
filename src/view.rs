@@ -227,16 +227,17 @@ fn canvas(app: &App, ui: &mut Ui) {
     if let (Some(l), Some(o)) = (app.loaded(), app.orient()) {
         let v = app.effective_view();
         let ds = app.dpi_scale();
-        let k = l.meta.width as f32 / l.bw as f32;
+        let (b, preview) = l.pick(v.s * ds);
+        let k = l.meta.width as f32 / b.w as f32;
         let snap = |x: f32| (x * ds).round() / ds;
         let m = o
-            .matrix(l.bw as f32, l.bh as f32)
+            .matrix(b.w as f32, b.h as f32)
             .then(Affine::scale(k * v.s, k * v.s))
             .then(Affine::translate(snap(vp.cx() - v.cx * v.s), snap(vp.cy() - v.cy * v.s)));
         ui.cmds.push(Cmd::Clip(vp));
-        // Source pixels show as squares from 200 %; a reduced bitmap (a
-        // preview awaiting its full size) is always smoothed.
-        ui.cmds.push(Cmd::Image { m, smooth: k > 1.0 || v.s * ds < 2.0 });
+        // Source pixels show as squares from 200 %; a reduced bitmap is
+        // always smoothed.
+        ui.cmds.push(Cmd::Image { m, smooth: k > 1.0 || v.s * ds < 2.0, preview });
         ui.cmds.push(Cmd::Unclip);
         if app.osd > 0.01 && app.dialog.is_none() {
             osd(app, ui, vp);
@@ -345,9 +346,10 @@ fn edit_canvas(app: &App, ui: &mut Ui) {
     let (Some(l), Some(o), Some(e), Some((r, s))) = (app.loaded(), app.orient(), app.edit.as_ref(), app.edit_geometry()) else {
         return;
     };
-    let k = l.meta.width as f32 / l.bw as f32;
-    let m = o.matrix(l.bw as f32, l.bh as f32).then(Affine::scale(k * s, k * s)).then(Affine::translate(r.x, r.y));
-    ui.cmds.push(Cmd::Image { m, smooth: true });
+    let (b, preview) = l.pick(s * app.dpi_scale());
+    let k = l.meta.width as f32 / b.w as f32;
+    let m = o.matrix(b.w as f32, b.h as f32).then(Affine::scale(k * s, k * s)).then(Affine::translate(r.x, r.y));
+    ui.cmds.push(Cmd::Image { m, smooth: true, preview });
 
     let c = Rect::new(r.x + e.crop.x * r.w, r.y + e.crop.y * r.h, e.crop.w * r.w, e.crop.h * r.h);
     let shade = Color::BLACK.alpha(0.5);
