@@ -19,8 +19,6 @@ if (-not (Test-Path $iscc)) {
 
 $root = Split-Path $PSScriptRoot
 $exe = Join-Path $root "dist\windmolen.exe"
-# build.rs writes the icon next to its other outputs.
-$ico = Get-ChildItem (Join-Path $root "target\release\build\windmolen-*\out\windmolen.ico") | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $ico) { throw "windmolen.ico not found: build the program first" }
-& $iscc /Qp "/DVersion=$Version" "/DSource=$exe" "/DIcon=$($ico.FullName)" "/O$(Join-Path $root 'dist')" (Join-Path $PSScriptRoot "windmolen.iss")
+$ico = Join-Path $root "res\windmolen.ico"
+& $iscc /Qp "/DVersion=$Version" "/DSource=$exe" "/DIcon=$ico" "/O$(Join-Path $root 'dist')" (Join-Path $PSScriptRoot "windmolen.iss")
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }

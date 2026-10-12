@@ -211,14 +211,14 @@ impl Host {
 
     /// Window icons for the taskbar and Alt+Tab, at the current DPI.
     fn set_icons(&self, hwnd: HWND) {
-        let png = crate::render::APP_ICON_PNG;
-        // SAFETY: PNG data in icon-resource form; handles are freed later.
+        // SAFETY: PNG frames in icon-resource form; handles are freed later.
         unsafe {
             let dpi = GetDpiForWindow(hwnd);
             let old = self.icons.get();
             let mut new = [None, None];
             for (i, (kind, metric)) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)].into_iter().enumerate() {
                 let size = GetSystemMetricsForDpi(metric, dpi);
+                let Some(png) = crate::icons::ico_frame(crate::icons::APP_ICO, size.max(1) as u32) else { continue };
                 if let Ok(icon) = CreateIconFromResourceEx(png, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR) {
                     SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
                     new[i] = Some(icon);

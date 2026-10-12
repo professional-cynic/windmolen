@@ -189,6 +189,7 @@ path parser, metadata formatting) on any OS.
 | `src/sys.rs` | Shell dialogs, theme settings, locale formatting, no-overwrite file ops |
 | `src/edit.rs`, `geom.rs`, `theme.rs`, `icons.rs`, `meta.rs`, `settings.rs` | Pure, tested logic |
 | `src/install.rs`, `update.rs` | File-type registration; updates through the installer |
+| `res/make-icon.py` | Draws the icon: `windmolen.png` and `windmolen.ico` with every size Windows uses (16–256 px), so Windows never shrinks it |
 | `installer/` | Inno Setup script, and the scripts CI uses to build and test it |
 
 ## Known limitations

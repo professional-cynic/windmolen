@@ -85,6 +85,30 @@ impl Icon {
     }
 }
 
+/// The app icon at every size Windows asks for (`res/make-icon.py`).
+pub static APP_ICO: &[u8] = include_bytes!("../res/windmolen.ico");
+
+/// The image data of the smallest frame of an ICO file at least `size`
+/// pixels wide (else the largest), so Windows only ever shrinks a little.
+pub fn ico_frame(ico: &[u8], size: u32) -> Option<&[u8]> {
+    let u16_at = |i: usize| Some(u16::from_le_bytes(ico.get(i..i + 2)?.try_into().ok()?));
+    let u32_at = |i: usize| Some(u32::from_le_bytes(ico.get(i..i + 4)?.try_into().ok()?));
+    if u16_at(0)? != 0 || u16_at(2)? != 1 {
+        return None;
+    }
+    let frames = (0..usize::from(u16_at(4)?)).filter_map(|k| {
+        let e = 6 + 16 * k;
+        let w = match *ico.get(e)? {
+            0 => 256,
+            w => u32::from(w),
+        };
+        let (len, at) = (u32_at(e + 8)? as usize, u32_at(e + 12)? as usize);
+        Some((w, ico.get(at..at.checked_add(len)?)?))
+    });
+    let (fit, big): (Vec<_>, Vec<_>) = frames.partition(|&(w, _)| w >= size);
+    fit.into_iter().min_by_key(|&(w, _)| w).or_else(|| big.into_iter().max_by_key(|&(w, _)| w)).map(|(_, d)| d)
+}
+
 /// A path segment in absolute coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Seg {
@@ -329,6 +353,18 @@ mod tests {
         arc_to_cubics(&mut v, (10.0, 0.0), 10.0, 10.0, 0.0, false, true, (0.0, 10.0));
         assert_eq!(v.len(), 1);
         assert!(matches!(v[0], Seg::Cubic(_, _, _, _, x, y) if x == 0.0 && y == 10.0));
+    }
+
+    #[test]
+    fn picks_the_nearest_larger_icon_frame() {
+        let frame = |n: u32| ico_frame(APP_ICO, n).map(|d| u32::from_be_bytes(d[16..20].try_into().unwrap()));
+        assert_eq!(frame(16), Some(16)); // PNG IHDR width
+        assert_eq!(frame(30), Some(32));
+        assert_eq!(frame(48), Some(48));
+        assert_eq!(frame(96), Some(256));
+        assert_eq!(frame(512), Some(256));
+        assert_eq!(ico_frame(b"\0\0\x01\0\x01\0", 16), None); // entry beyond the file
+        assert_eq!(ico_frame(b"garbage", 16), None);
     }
 
     #[test]

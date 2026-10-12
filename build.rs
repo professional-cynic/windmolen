@@ -4,8 +4,9 @@
 //! Embeds the application manifest (asInvoker, per-monitor DPI v2, long
 //! paths) and, when a resource compiler is available, the Explorer icon.
 //!
-//! No build dependencies: the `.ico` is written here (ICO files may wrap PNG
-//! data), and the manifest goes through the MSVC linker directly. Without a
+//! No build dependencies: `res/windmolen.ico` (every size drawn by
+//! `res/make-icon.py`) is embedded as is, and the manifest goes through the
+//! MSVC linker directly. Without a
 //! resource compiler the program still works; it sets its DPI awareness at
 //! run time and never requests elevation either way.
 
@@ -16,7 +17,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=res/windmolen.manifest");
-    println!("cargo:rerun-if-changed=res/windmolen.png");
+    println!("cargo:rerun-if-changed=res/windmolen.ico");
     println!("cargo:rerun-if-env-changed=WINDRES");
     println!("cargo:rerun-if-env-changed=RC");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
@@ -27,14 +28,7 @@ fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest = res.join("windmolen.manifest");
 
-    // An ICO directory with a single 256×256 PNG entry.
-    let png = fs::read(res.join("windmolen.png")).expect("icon PNG");
-    let mut ico = vec![0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 32, 0];
-    ico.extend((png.len() as u32).to_le_bytes());
-    ico.extend(22u32.to_le_bytes());
-    ico.extend(&png);
-    let ico_path = out.join("windmolen.ico");
-    fs::write(&ico_path, ico).unwrap();
+    let ico_path = res.join("windmolen.ico");
 
     let quote = |p: &Path| p.display().to_string().replace('\\', "\\\\");
     let mut rc = format!("1 ICON \"{}\"\n", quote(&ico_path));
