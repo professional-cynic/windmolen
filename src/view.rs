@@ -564,9 +564,11 @@ fn sidebar(app: &App, ui: &mut Ui) {
 fn toast(app: &App, ui: &mut Ui) {
     let Some(toast) = &app.toast else { return };
     let max_w = (app.width() - 24.0).max(120.0);
-    // Padding 12 + label margin 6, then 6 + spacing 6 + button 34 + padding 6.
-    let tw = ui.text_width(&toast.text, TextStyle::Body).min(max_w - 70.0);
-    let (w, h) = (tw + 70.0, 46.0);
+    // Padding 12 + label margin 6, then 6 + spacing 6 + button 34 + padding 6,
+    // and before the close button any action button (such as Undo) + 6.
+    let bw = toast.action.map_or(0.0, |(label, _)| ui.text_width(label, TextStyle::Heading) + 34.0 + 6.0);
+    let tw = ui.text_width(&toast.text, TextStyle::Body).min(max_w - 70.0 - bw);
+    let (w, h) = (tw + 70.0 + bw, 46.0);
     let bottom = app.height() - 24.0 - if app.edit.is_some() { TOOLBAR_H } else { 0.0 };
     let lift = (1.0 - app.toast_alpha()) * 12.0;
     let r = Rect::new(((app.width() - w) / 2.0).round(), bottom - h + lift, w, h);
@@ -576,6 +578,10 @@ fn toast(app: &App, ui: &mut Ui) {
     ui.widget(r, Action::None, None);
     ui.text(Rect::new(r.x + 18.0, r.y, tw, h), toast.text.as_str(), TextStyle::Body, Color::WHITE, Align::Start);
     let close = Rect::new(r.right() - 6.0 - BTN, r.y + 6.0, BTN, BTN);
+    if let Some((label, action)) = toast.action {
+        let b = Rect::new(close.x - bw, r.y + 6.0, bw - 6.0, BTN);
+        ui.button(b, action, Content::Label(label), Style::Normal, Color::WHITE, true, false, None);
+    }
     ui.radius = BTN / 2.0;
     ui.button(close, Action::CloseToast, Content::Icon(Icon::WindowClose), Style::Flat, Color::WHITE, true, false, Some("Dismiss"));
     ui.radius = 9.0;
@@ -624,6 +630,7 @@ const TAIL_H: f32 = 12.0;
 
 fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
     const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    let image_actions = app.current().is_some() && app.edit.is_none();
     let (anchor, items, above): (Option<Rect>, Vec<Item>, bool) = match p {
         // App-wide actions, then the HIG's standard items.
         Popover::Main => (
@@ -642,6 +649,15 @@ fn popover(app: &App, ui: &mut Ui, p: Popover, anchors: &Anchors) {
                     accel: Some("Ctrl+B"),
                     check: None,
                     enabled: app.selection && app.current().is_some() && app.edit.is_none(),
+                },
+                Item::Separator,
+                Item::Entry { action: Action::Copy, label: "Copy".into(), accel: Some("Ctrl+C"), check: None, enabled: image_actions },
+                Item::Entry {
+                    action: Action::Delete,
+                    label: "Move to Recycle Bin".into(),
+                    accel: Some("Delete"),
+                    check: None,
+                    enabled: image_actions && !app.busy(),
                 },
                 Item::Separator,
                 entry(Action::Preferences, "Preferences", Some("Ctrl+,")),
@@ -802,6 +818,8 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Open", "Ctrl+O"),
             ("Open image only", "Ctrl+Shift+O"),
             ("Show all images in folder", "Ctrl+B"),
+            ("Copy image", "Ctrl+C"),
+            ("Move to Recycle Bin", "Delete"),
             ("Main menu", "F10"),
             ("Preferences", "Ctrl+,"),
             ("Keyboard shortcuts", "Ctrl+?"),

@@ -358,6 +358,38 @@ pub fn decode(f: &IWICImagingFactory, path: &Path, max_edge: u32) -> std::result
     }
 }
 
+/// Decodes the whole image upright, in sRGB with straight alpha, for the
+/// clipboard: (width, height, top-down BGRA pixels).
+pub fn decode_upright(f: &IWICImagingFactory, path: &Path, orient: Orient) -> std::result::Result<(u32, u32, Vec<u8>), String> {
+    let wide = HSTRING::from(path.as_os_str());
+    // SAFETY: COM calls on valid objects; the buffer is sized from checked maths.
+    unsafe {
+        let dec = f.CreateDecoderFromFilename(&wide, None, GENERIC_READ, WICDecodeMetadataCacheOnDemand).map_err(|e| describe(&e))?;
+        let frame = dec.GetFrame(0).map_err(|e| describe(&e))?;
+        let mut src: IWICBitmapSource = frame.cast().map_err(|e| describe(&e))?;
+        if orient != Orient::IDENTITY {
+            let rot = f.CreateBitmapFlipRotator().map_err(|e| describe(&e))?;
+            rot.Initialize(&src, transform_options(orient)).map_err(|e| describe(&e))?;
+            src = rot.cast().map_err(|e| describe(&e))?;
+        }
+        let (src, _) = to_srgb(f, &frame, src);
+        let conv = f.CreateFormatConverter().map_err(|e| describe(&e))?;
+        conv.Initialize(&src, &GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)
+            .map_err(|e| describe(&e))?;
+        let (mut w, mut h) = (0, 0);
+        conv.GetSize(&mut w, &mut h).map_err(|e| describe(&e))?;
+        if w == 0 || h == 0 || u64::from(w) * u64::from(h) > MAX_PIXELS {
+            return Err(format!("Unsupported image size ({w} × {h})"));
+        }
+        let len = w as usize * 4 * h as usize;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(len).map_err(|_| "Not enough memory to copy this image".to_owned())?;
+        pixels.resize(len, 0);
+        conv.CopyPixels(std::ptr::null(), w * 4, &mut pixels).map_err(|e| describe(&e))?;
+        Ok((w, h, pixels))
+    }
+}
+
 /// Decodes an image held in memory (an embedded resource) to
 /// premultiplied BGRA: (width, height, pixels).
 pub fn decode_bytes(f: &IWICImagingFactory, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {

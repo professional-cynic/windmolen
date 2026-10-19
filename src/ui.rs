@@ -63,6 +63,12 @@ pub enum Action {
     OpenProject,
     ReportIssue,
     CloseToast,
+    /// Copies the current image (Ctrl+C).
+    Copy,
+    /// Moves the current image to the Recycle Bin (Delete), with Undo.
+    Delete,
+    /// The toast's button: brings back the image just deleted.
+    Undo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -35,6 +35,8 @@ struct Host {
     tracking: Cell<bool>,
     /// A shutdown block reason is registered.
     blocking: Cell<bool>,
+    /// The file on the clipboard, whose picture is rendered on request.
+    clip: RefCell<Option<(PathBuf, crate::edit::Orient)>>,
 }
 
 fn loword(v: usize) -> u16 {
@@ -43,6 +45,13 @@ fn loword(v: usize) -> u16 {
 
 fn hiword(v: usize) -> u16 {
     (v >> 16) as u16
+}
+
+/// Whether the pointer is over this window (its client area or caption).
+fn pointer_over(hwnd: HWND) -> bool {
+    let mut pt = POINT::default();
+    // SAFETY: out-pointer to a local.
+    unsafe { GetCursorPos(&mut pt).is_ok() && WindowFromPoint(pt) == hwnd }
 }
 
 fn point(lp: LPARAM) -> (i32, i32) {
@@ -121,6 +130,7 @@ pub fn run(args: Vec<PathBuf>, only: bool) -> Result<()> {
             restore: Cell::new(None),
             tracking: Cell::new(false),
             blocking: Cell::new(false),
+            clip: RefCell::new(None),
         }));
         // Created in place, so it starts at the right DPI for its screen.
         let placement = sys::settings_path().and_then(|p| crate::settings::Settings::load(&p).ok()).and_then(|s| s.placement);
@@ -231,6 +241,18 @@ impl Host {
         }
     }
 
+    /// Decodes the copied image and hands it to the open clipboard.
+    fn render_clip(&self) {
+        let Some((path, orient)) = self.clip.borrow().clone() else { return };
+        let dib = crate::wic::Wic::new()
+            .map_err(|e| e.message())
+            .and_then(|wic| crate::wic::decode_upright(&wic.0, &path, orient))
+            .map(|(w, h, px)| crate::clip::dib_v5(w, h, &px));
+        if let Ok(dib) = dib {
+            let _ = sys::clipboard_put_picture(&dib);
+        }
+    }
+
     fn dips(&self, hwnd: HWND, x: i32, y: i32) -> (f32, f32) {
         // SAFETY: plain query on our window.
         let s = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
@@ -250,6 +272,12 @@ impl Host {
 
     /// Repaints if needed and arms the animation/deadline timer.
     fn after(&self, hwnd: HWND) {
+        // An image deleted with Delete goes to the Recycle Bin once its
+        // Undo toast is gone.
+        if let Some(path) = self.with(App::due_delete).flatten() {
+            self.run_effects(hwnd, vec![Effect::Recycle(path)]);
+            return;
+        }
         let Some((dirty, wake, work)) = self.with(|a| (a.take_dirty(), a.next_wake(), a.work_reason())) else { return };
         // SAFETY: invalidation, timers and shutdown reasons of our own window.
         unsafe {
@@ -329,6 +357,22 @@ impl Host {
                     }
                     Effect::OpenUrl(url) => {
                         sys::shell_open(&url);
+                    }
+                    Effect::Copy { path, orient } => {
+                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let text = match sys::clipboard_set_file(hwnd, &path) {
+                            Ok(()) => {
+                                self.clip.replace(Some((path, orient)));
+                                format!("Copied “{name}”")
+                            }
+                            Err(e) => format!("Could not copy: {}", e.message()),
+                        };
+                        self.with(|a| a.show_toast(&text));
+                    }
+                    Effect::Recycle(path) => {
+                        let result = sys::recycle(hwnd, &path).map_err(|e| e.message());
+                        let more = self.with(|a| a.recycled(path, result)).unwrap_or_default();
+                        self.run_effects(hwnd, more);
                     }
                     // The installer closes this window itself, once it can.
                     Effect::Restart(file) => {
@@ -434,7 +478,11 @@ impl Host {
                 // layouts, so its clicks arrive as non-client messages.
                 WM_NCMOUSEMOVE => {
                     let on = wp.0 == HTMAXBUTTON as usize;
-                    self.with(|a| a.nc_hover(on));
+                    let (sx, sy) = point(lp);
+                    let mut pt = POINT { x: sx, y: sy };
+                    let _ = ScreenToClient(hwnd, &mut pt);
+                    let (x, y) = self.dips(hwnd, pt.x, pt.y);
+                    self.with(|a| a.nc_move(x, y, on));
                     let mut t = TRACKMOUSEEVENT {
                         cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                         dwFlags: TME_LEAVE | TME_NONCLIENT,
@@ -449,7 +497,8 @@ impl Host {
                     return def();
                 }
                 WM_NCMOUSELEAVE => {
-                    self.with(|a| a.nc_hover(false));
+                    let over = pointer_over(hwnd);
+                    self.with(|a| a.mouse_leave(over));
                 }
                 WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wp.0 == HTMAXBUTTON as usize => {
                     self.with(|a| {
@@ -482,7 +531,8 @@ impl Host {
                 }
                 WM_MOUSELEAVE => {
                     self.tracking.set(false);
-                    self.with(App::mouse_leave);
+                    let over = pointer_over(hwnd);
+                    self.with(|a| a.mouse_leave(over));
                 }
                 WM_LBUTTONDOWN => {
                     SetCapture(hwnd);
@@ -553,6 +603,7 @@ impl Host {
                         VK_F9 => Some(Key::F9),
                         VK_F10 => Some(Key::F10),
                         VK_F11 => Some(Key::F11),
+                        VK_DELETE => Some(Key::Delete),
                         _ if ctrl => match vk.0 {
                             v @ 0x41..=0x5A => Some(Key::Letter(char::from(v as u8).to_ascii_lowercase())),
                             v @ 0x30..=0x39 => Some(Key::Letter(char::from(v as u8))),
@@ -581,6 +632,23 @@ impl Host {
                         Some(c) if !ctrl => fx = self.with(|a| a.char(c)).unwrap_or_default(),
                         _ => return def(),
                     }
+                }
+                // A program pastes the picture promised by Effect::Copy; on
+                // exit, Windows asks for everything still promised.
+                WM_RENDERFORMAT if wp.0 == usize::from(windows::Win32::System::Ole::CF_DIBV5.0) => {
+                    self.render_clip();
+                }
+                WM_RENDERALLFORMATS => {
+                    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardOwner, OpenClipboard};
+                    if OpenClipboard(Some(hwnd)).is_ok() {
+                        if GetClipboardOwner() == Ok(hwnd) {
+                            self.render_clip();
+                        }
+                        let _ = CloseClipboard();
+                    }
+                }
+                WM_DESTROYCLIPBOARD => {
+                    self.clip.replace(None);
                 }
                 WM_TIMER => {
                     self.with(App::tick);
@@ -657,6 +725,9 @@ impl Host {
                         return LRESULT(0);
                     }
                     self.save_placement(hwnd);
+                    if let Some(path) = self.with(App::take_delete).flatten() {
+                        let _ = sys::recycle(hwnd, &path);
+                    }
                     return def();
                 }
                 // Asked before Windows ends the session: not while files are

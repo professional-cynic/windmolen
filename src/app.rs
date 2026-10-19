@@ -40,6 +40,8 @@ const MAX_ZOOM: f32 = 32.0;
 const ANIM: Duration = Duration::from_millis(180);
 const OSD_IDLE: Duration = Duration::from_secs(2);
 const TOAST_TIME: Duration = Duration::from_secs(3);
+/// A toast with a button stays longer, as `AdwToast` does.
+const TOAST_ACTION_TIME: Duration = Duration::from_secs(5);
 const TOAST_FADE: Duration = Duration::from_millis(200);
 const TOOLTIP_DELAY: Duration = Duration::from_millis(600);
 const SETTINGS_LOCK: windows::core::PCWSTR = windows::core::w!("Local\\Windmolen.Settings");
@@ -60,6 +62,13 @@ pub enum Effect {
     Close,
     Title(String),
     OpenUrl(String),
+    /// Puts the file on the clipboard; `orient` turns its picture upright.
+    Copy {
+        path: PathBuf,
+        orient: Orient,
+    },
+    /// Moves the file to the Recycle Bin, then reports with [`App::recycled`].
+    Recycle(PathBuf),
     /// Starts the (updated) program again with the current file, then closes.
     Restart(Option<PathBuf>),
 }
@@ -165,6 +174,14 @@ pub struct Toast {
     pub text: String,
     pub born: Instant,
     pub sticky: bool,
+    /// A button, such as Undo.
+    pub action: Option<(&'static str, Action)>,
+}
+
+impl Toast {
+    fn lifetime(&self) -> Duration {
+        if self.action.is_some() { TOAST_ACTION_TIME } else { TOAST_TIME }
+    }
 }
 
 pub enum TaskMsg {
@@ -247,6 +264,9 @@ pub struct App {
     last_motion: Instant,
     pub osd: f32,
     pub toast: Option<Toast>,
+    /// An image hidden by Delete; it goes to the Recycle Bin once its Undo
+    /// toast is gone, at the next Delete, or when the window closes.
+    pending_delete: Option<PathBuf>,
     dirty: bool,
     pub now: Instant,
 }
@@ -317,6 +337,7 @@ impl App {
             last_motion: now - OSD_IDLE,
             osd: 0.0,
             toast: None,
+            pending_delete: None,
             dirty: true,
             now,
         };
@@ -484,7 +505,13 @@ impl App {
 
     fn scan(&self, dir: &Path) -> Vec<PathBuf> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_file())).map(|e| e.path()).filter(|p| self.is_image(p)).collect())
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                    .map(|e| e.path())
+                    .filter(|p| self.is_image(p) && self.pending_delete.as_ref() != Some(p))
+                    .collect()
+            })
             .unwrap_or_default();
         v.sort_by(|a, b| sys::natural_cmp(a, b));
         v
@@ -590,7 +617,7 @@ impl App {
     /// still exists.
     fn rescan(&mut self) -> Vec<Effect> {
         let files = if self.selection {
-            self.files.iter().filter(|p| p.is_file()).cloned().collect()
+            self.files.iter().filter(|p| p.is_file() && self.pending_delete.as_ref() != Some(*p)).cloned().collect()
         } else if let Some(dir) = &self.folder {
             self.scan(dir)
         } else {
@@ -1270,17 +1297,109 @@ impl App {
     }
 
     // --------------------------------------------------------------------
+    // Copy and delete
+    // --------------------------------------------------------------------
+
+    fn copy_current(&mut self) -> Vec<Effect> {
+        let Some(path) = self.current().map(Path::to_path_buf) else { return Vec::new() };
+        if self.edit.is_some() {
+            self.show_toast("Save or cancel the edit first");
+            return Vec::new();
+        }
+        let orient = self.loaded().map_or(Orient::IDENTITY, |l| l.meta.orient);
+        vec![Effect::Copy { path, orient }]
+    }
+
+    /// Hides the current image at once and offers Undo; the file itself
+    /// moves to the Recycle Bin later ([`due_delete`](Self::due_delete)).
+    fn delete_current(&mut self) -> Vec<Effect> {
+        let Some(path) = self.current().map(Path::to_path_buf) else { return Vec::new() };
+        if self.edit.is_some() || self.busy() {
+            self.show_toast(if self.busy() { "Wait until the files are written" } else { "Save or cancel the edit first" });
+            return Vec::new();
+        }
+        let mut fx: Vec<Effect> = self.pending_delete.take().map(Effect::Recycle).into_iter().collect();
+        let i = self.index;
+        self.files.remove(i);
+        self.cache.remove(&path);
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.pending_delete = Some(path);
+        fx.extend(self.go(i.min(self.files.len().saturating_sub(1))));
+        self.toast = Some(Toast {
+            text: format!("“{name}” moved to the Recycle Bin"),
+            born: Instant::now(),
+            sticky: false,
+            action: Some(("Undo", Action::Undo)),
+        });
+        fx
+    }
+
+    fn undo_delete(&mut self) -> Vec<Effect> {
+        self.toast = None;
+        match self.pending_delete.take() {
+            Some(p) => self.restore(p),
+            None => Vec::new(),
+        }
+    }
+
+    /// Shows `path` again, in its place, if it belongs to the list on screen.
+    fn restore(&mut self, path: PathBuf) -> Vec<Effect> {
+        let here = self.selection || path.parent().is_some_and(|d| self.folder.as_deref() == Some(d));
+        if !here || self.files.contains(&path) {
+            return Vec::new();
+        }
+        let i = self.files.partition_point(|p| sys::natural_cmp(p, &path) == std::cmp::Ordering::Less);
+        self.files.insert(i, path);
+        self.go(i)
+    }
+
+    /// The hidden image, once its Undo toast is gone (expired, closed or
+    /// replaced by another): time to recycle it.
+    pub fn due_delete(&mut self) -> Option<PathBuf> {
+        let undo_shown = self.toast.as_ref().is_some_and(|t| t.action == Some(("Undo", Action::Undo)));
+        if undo_shown { None } else { self.pending_delete.take() }
+    }
+
+    /// The hidden image, whatever the toast shows (the window is closing).
+    pub fn take_delete(&mut self) -> Option<PathBuf> {
+        self.pending_delete.take()
+    }
+
+    /// The outcome of [`Effect::Recycle`].
+    pub fn recycled(&mut self, path: PathBuf, result: Result<bool, String>) -> Vec<Effect> {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        match result {
+            Ok(true) => {
+                if let (Some(dir), Some(file)) = (path.parent(), path.file_name()) {
+                    if self.settings.marks(dir, file) != 0 {
+                        self.update_settings(|st| st.set_marks(dir, file, 0));
+                    }
+                }
+                Vec::new()
+            }
+            Ok(false) => {
+                self.show_toast(&format!("Kept “{name}”"));
+                self.restore(path)
+            }
+            Err(e) => {
+                self.show_toast(&format!("Could not move “{name}” to the Recycle Bin: {e}"));
+                self.restore(path)
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------
     // Feedback
     // --------------------------------------------------------------------
 
     pub fn show_toast(&mut self, text: &str) {
-        self.toast = Some(Toast { text: text.into(), born: Instant::now(), sticky: false });
+        self.toast = Some(Toast { text: text.into(), born: Instant::now(), sticky: false, action: None });
         self.dirty = true;
     }
 
     fn show_sticky(&mut self, text: &str) {
         let born = self.toast.as_ref().filter(|t| t.sticky).map_or_else(Instant::now, |t| t.born);
-        self.toast = Some(Toast { text: text.into(), born, sticky: true });
+        self.toast = Some(Toast { text: text.into(), born, sticky: true, action: None });
         self.dirty = true;
     }
 
@@ -1291,7 +1410,7 @@ impl App {
             return 1.0;
         }
         let fade_in = (age / 0.15).min(1.0);
-        let fade_out = if t.sticky { 1.0 } else { ((TOAST_TIME.as_secs_f32() - age) / TOAST_FADE.as_secs_f32()).clamp(0.0, 1.0) };
+        let fade_out = if t.sticky { 1.0 } else { ((t.lifetime().as_secs_f32() - age) / TOAST_FADE.as_secs_f32()).clamp(0.0, 1.0) };
         fade_in.min(fade_out)
     }
 
@@ -1341,7 +1460,7 @@ impl App {
             };
             self.dirty = true;
         }
-        if self.toast.as_ref().is_some_and(|t| !t.sticky && self.now - t.born >= TOAST_TIME) {
+        if self.toast.as_ref().is_some_and(|t| !t.sticky && self.now - t.born >= t.lifetime()) {
             self.toast = None;
         }
         // A toast needs painting only while it fades, or when it vanishes.
@@ -1365,7 +1484,7 @@ impl App {
         // Sticky toasts stay until replaced; others fade out (or vanish).
         if let Some(t) = self.toast.as_ref().filter(|t| !t.sticky) {
             let fade = if self.animations { TOAST_FADE } else { Duration::ZERO };
-            wake.push(left(t.born + TOAST_TIME - fade));
+            wake.push(left(t.born + t.lifetime() - fade));
         }
         // Past the deadline, only input can hide the OSD (it is hovered).
         let idle = self.last_motion + OSD_IDLE;
@@ -1438,7 +1557,9 @@ impl App {
         }
     }
 
-    pub fn mouse_move(&mut self, x: f32, y: f32) {
+    /// Records pointer motion anywhere over the window; whether the OSD
+    /// shows depends on it. Returns whether the pointer moved.
+    fn note_motion(&mut self, x: f32, y: f32) -> bool {
         let moved = (x - self.mouse.0).abs() + (y - self.mouse.1).abs() > 0.5;
         self.mouse = (x, y);
         self.mouse_inside = true;
@@ -1447,7 +1568,15 @@ impl App {
             if self.fullscreen {
                 self.dirty = true;
             }
+            if self.osd < 1.0 && self.osd_target() > 0.0 {
+                self.dirty = true;
+            }
         }
+        moved
+    }
+
+    pub fn mouse_move(&mut self, x: f32, y: f32) {
+        self.note_motion(x, y);
         if let Some(p) = &self.pan {
             let v = self.effective_view();
             self.anim = None;
@@ -1461,19 +1590,21 @@ impl App {
         }
         let hit = self.widgets().into_iter().rev().find(|w| w.rect.contains(x, y)).map(|w| w.action);
         self.set_hover(hit);
-        if moved && self.osd < 1.0 && self.osd_target() > 0.0 {
-            self.dirty = true;
-        }
     }
 
-    pub fn mouse_leave(&mut self) {
-        self.mouse_inside = false;
+    /// The pointer left the client area: for good, or onto the window's
+    /// own caption (the header between its buttons), which still counts as
+    /// inside, so the OSD doesn't blink while moving along the header.
+    pub fn mouse_leave(&mut self, still_over_window: bool) {
+        self.mouse_inside = still_over_window;
         self.set_hover(None);
         self.dirty = true;
     }
 
-    /// Hover over the maximise button arrives through non-client messages.
-    pub fn nc_hover(&mut self, max_button: bool) {
+    /// Motion over the caption and the maximise button, which arrive as
+    /// non-client messages.
+    pub fn nc_move(&mut self, x: f32, y: f32, max_button: bool) {
+        self.note_motion(x, y);
         self.set_hover(max_button.then_some(Action::Maximize));
     }
 
@@ -1670,6 +1801,9 @@ impl App {
             Action::OpenProject => return vec![Effect::OpenUrl(crate::release::project_url())],
             Action::ReportIssue => return vec![Effect::OpenUrl(crate::release::issues_url())],
             Action::CloseToast => self.toast = None,
+            Action::Copy => return self.copy_current(),
+            Action::Delete => return self.delete_current(),
+            Action::Undo => return self.undo_delete(),
             Action::SendCopy => self.send(SendMode::Copy),
             Action::SendMove => self.send(SendMode::Move),
         }
@@ -1759,10 +1893,12 @@ impl App {
                 self.dirty = true;
                 Vec::new()
             }
+            Key::Delete if self.edit.is_none() => self.activate(Action::Delete),
             Key::F9 => self.activate(Action::Properties),
             Key::F10 => self.activate(Action::MainMenu),
             Key::F11 => self.activate(Action::Fullscreen),
             Key::Letter(c) if ctrl => match (c, shift) {
+                ('c', false) => self.activate(Action::Copy),
                 ('o', false) if self.edit.is_none() => self.activate(Action::Open),
                 ('o', true) if self.edit.is_none() => self.activate(Action::OpenOnly),
                 ('b', _) if self.edit.is_none() => self.activate(Action::ShowFolder),
@@ -1887,6 +2023,7 @@ pub enum Key {
     F9,
     F10,
     F11,
+    Delete,
     /// A letter, digit or symbol pressed together with Ctrl.
     Letter(char),
 }

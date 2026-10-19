@@ -40,6 +40,12 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
   on screen is kept at full size, for zooming, and it is drawn from a screen-sized
   copy until you zoom past it, so redrawing costs the same for any photo size.
 - Properties sidebar: file, dimensions, colour profile, camera, lens, exposure, aperture, ISO, focal length, date taken.
+- **Copy** (Ctrl+C) puts the image on the clipboard both as a file, which Explorer
+  pastes as a copy, and as a picture for Paint, Word or a chat. The picture is only
+  decoded when a program pastes it.
+- **Delete** moves the image to the Recycle Bin, with **Undo** in the toast. The file
+  goes there once the toast is gone (or the window closes); where a drive has no
+  Recycle Bin, Windows asks before deleting it for good.
 - Editing: rotate, flip and crop (free or fixed aspect ratios).
   - **Save Copy** writes `name (edited).ext`.
   - **Replace Original…** asks for confirmation first.
@@ -149,6 +155,7 @@ offline code signing (Authenticode), which needs a certificate.
 | Best fit / 100 % | F or Ctrl+0 / 0 or Ctrl+1 |
 | Toggle mark 1–9 | 1 … 9 |
 | Marks menu / remove marks / send | M / U / Ctrl+M |
+| Copy / move to Recycle Bin | Ctrl+C / Delete |
 | Edit · rotate · flip | E · R, Shift+R · H, V (in edit) |
 | Save copy / cancel | Ctrl+S / Esc |
 | Properties · fullscreen · menu | F9 or I · F11 · F10 |
@@ -187,7 +194,7 @@ path parser, metadata formatting) on any OS.
 | `src/render.rs` | Direct2D/DirectWrite back end |
 | `src/wic.rs` | Decoding thread, metadata, colour management, saving |
 | `src/sys.rs` | Shell dialogs, theme settings, locale formatting, no-overwrite file ops |
-| `src/edit.rs`, `geom.rs`, `theme.rs`, `icons.rs`, `meta.rs`, `settings.rs` | Pure, tested logic |
+| `src/edit.rs`, `geom.rs`, `theme.rs`, `icons.rs`, `meta.rs`, `settings.rs`, `clip.rs` | Pure, tested logic |
 | `src/install.rs`, `update.rs` | File-type registration; updates through the installer |
 | `res/make-icon.py` | Draws the icon: `windmolen.png` and `windmolen.ico` with every size Windows uses (16–256 px), so Windows never shrinks it |
 | `installer/` | Inno Setup script, and the scripts CI uses to build and test it |
@@ -200,7 +207,6 @@ path parser, metadata formatting) on any OS.
   This is the largest gap against the HIG. Keyboard access is complete.
 - Animated GIF/WebP show their first frame; editing them is disabled.
 - Colour is managed to sRGB, not to the monitor's own profile.
-- No clipboard or delete-to-Recycle-Bin yet.
 - Windows 11 lists the right-click verb under **Show more options** (Shift+F10). The new
   top-level menu only accepts apps with package identity (a signed MSIX), which this
   deliberately avoids.

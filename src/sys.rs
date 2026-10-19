@@ -413,6 +413,82 @@ pub fn temp_beside(near: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
+/// Puts `path` on the clipboard as a file, which Explorer pastes as a copy,
+/// and offers it as a picture that `owner` renders only when a program asks
+/// for one (`WM_RENDERFORMAT`), so copying a large photo costs nothing.
+pub fn clipboard_set_file(owner: HWND, path: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData};
+    use windows::Win32::System::Ole::{CF_DIBV5, CF_HDROP};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // SAFETY: the clipboard is opened for our window and closed below.
+    unsafe {
+        OpenClipboard(Some(owner))?;
+        let r = (|| {
+            EmptyClipboard()?;
+            clipboard_put(u32::from(CF_HDROP.0), &crate::clip::drop_files(&wide))?;
+            // DROPEFFECT_COPY: pasting copies rather than moves.
+            clipboard_put(RegisterClipboardFormatW(w!("Preferred DropEffect")), &1u32.to_le_bytes())?;
+            // A promise without data: the call returns no handle by design,
+            // which the bindings report as an error.
+            let _ = SetClipboardData(u32::from(CF_DIBV5.0), None);
+            Ok(())
+        })();
+        let _ = CloseClipboard();
+        r
+    }
+}
+
+/// Supplies the picture promised by [`clipboard_set_file`]; the clipboard
+/// is already open (`WM_RENDERFORMAT`) or opened by the caller.
+pub fn clipboard_put_picture(dib: &[u8]) -> Result<()> {
+    use windows::Win32::System::Ole::CF_DIBV5;
+    clipboard_put(u32::from(CF_DIBV5.0), dib)
+}
+
+/// Copies `data` into movable global memory, which the clipboard then owns.
+fn clipboard_put(format: u32, data: &[u8]) -> Result<()> {
+    use windows::Win32::Foundation::GlobalFree;
+    use windows::Win32::System::DataExchange::SetClipboardData;
+    use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+    // SAFETY: the block is `data.len()` bytes and locked while written; it
+    // is freed here unless the clipboard took it.
+    unsafe {
+        let h = GlobalAlloc(GMEM_MOVEABLE, data.len().max(1))?;
+        let p = GlobalLock(h);
+        if p.is_null() {
+            let _ = GlobalFree(Some(h));
+            return Err(windows::core::Error::from_thread());
+        }
+        std::ptr::copy_nonoverlapping(data.as_ptr(), p.cast::<u8>(), data.len());
+        let _ = GlobalUnlock(h);
+        if let Err(e) = SetClipboardData(format, Some(HANDLE(h.0))) {
+            let _ = GlobalFree(Some(h));
+            return Err(e);
+        }
+        Ok(())
+    }
+}
+
+/// Moves `path` to the Recycle Bin. `Ok(false)` when the file stayed: on a
+/// drive without a Recycle Bin, Windows asks before deleting it for good,
+/// and the user declined.
+pub fn recycle(owner: HWND, path: &Path) -> Result<bool> {
+    // SAFETY: COM calls on a freshly created operation; strings outlive them.
+    unsafe {
+        let op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
+        op.SetOwnerWindow(owner)?;
+        op.SetOperationFlags(FILEOPERATION_FLAGS(FOF_NOCONFIRMATION.0 | FOF_SILENT.0 | FOF_WANTNUKEWARNING.0 | FOFX_RECYCLEONDELETE.0))?;
+        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path.as_os_str()), None)?;
+        op.DeleteItem(&item, None)?;
+        match op.PerformOperations() {
+            Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => return Ok(false),
+            r => r?,
+        }
+    }
+    Ok(!path.exists())
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
