@@ -8,6 +8,10 @@ A lean, fast photo viewer for Windows, designed after the GNOME HIG and
 libadwaita (colours, type scale, header bar, status pages, boxed lists,
 popovers, dialogs, toasts).
 
+![Windmolen showing a photo of wind turbines on green hills](docs/screenshot.jpg)
+
+<sub>Photo by [Luo Lei](https://unsplash.com/photos/Xa4pTwafe5U) on Unsplash.</sub>
+
 - **One dependency:** Microsoft's own [`windows`](https://github.com/microsoft/windows-rs)
   crate (plus its `windows-numerics` companion). The UI toolkit, layout, icons and
   widgets are written in this crate.
@@ -211,11 +215,6 @@ path parser, metadata formatting) on any OS.
   top-level menu only accepts apps with package identity (a signed MSIX), which this
   deliberately avoids.
 - Two separate opens less than about 1.5 s apart are treated as one selection.
-- Tested here through unit tests and under Wine (rendering, navigation, marks,
-  send, crop and save, install/uninstall registration, multi-file grouping).
-  Explorer itself and the Settings default-apps page can't be exercised under Wine. Wine 9 lacks WIC rotation
-  (newer Wine has it) and JPEG metadata, so those paths, and the real DWM frame, still need a check on Windows;
-  the order in which WIC flips and rotates is pinned by a unit test modelled on Wine's implementation.
 
 ## License
 
