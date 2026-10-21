@@ -194,12 +194,23 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
         }
     };
 
+    // With the Properties panel open, the header splits like a split view's:
+    // the title centres over the image, and the panel's border continues
+    // up through the header where no button covers it.
+    let c = app.viewport().cx();
+    if app.sidebar_open() {
+        let x = w - SIDEBAR_W;
+        if right >= x {
+            ui.vline(x, 0.0, HEADER_H - 1.0, t.sidebar_border);
+        }
+    }
+
     // Centred title, shifted only when it would collide with the sides.
     let pad = 12.0;
-    let room = ((w / 2.0 - left).min(right - w / 2.0) - pad).max(0.0) * 2.0;
+    let room = ((c - left).min(right - c) - pad).max(0.0) * 2.0;
     let need = ui.text_width(&title, TextStyle::Heading).max(subtitle.as_deref().map_or(0.0, |s| ui.text_width(s, TextStyle::Caption)));
     let area = if need <= room {
-        Rect::new(w / 2.0 - room / 2.0, 0.0, room, HEADER_H - 1.0)
+        Rect::new(c - room / 2.0, 0.0, room, HEADER_H - 1.0)
     } else {
         Rect::new(left + pad, 0.0, (right - left - 2.0 * pad).max(0.0), HEADER_H - 1.0)
     };
