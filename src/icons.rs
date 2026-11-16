@@ -32,6 +32,7 @@ pub enum Icon {
     Image,
     ImageMissing,
     ExternalLink,
+    Trash,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,6 +82,9 @@ impl Icon {
                 ("M9.5 2.75H13.25V6.5M13 3L7.5 8.5", Stroke(1.5)),
             ],
             Self::ImageMissing => &[(FRAME, Stroke(1.5)), ("M5.5 5.5L10.5 10.5M10.5 5.5L5.5 10.5", Stroke(1.5))],
+            Self::Trash => {
+                &[("M2 4H14M6 4V2.5H10V4", Stroke(1.5)), ("M3.75 4L4.5 13.5H11.5L12.25 4", Stroke(1.5)), ("M6.75 6.5V11M9.25 6.5V11", Stroke(1.25))]
+            }
         }
     }
 }
@@ -329,6 +333,7 @@ mod tests {
             Icon::Image,
             Icon::ImageMissing,
             Icon::ExternalLink,
+            Icon::Trash,
         ];
         for icon in all {
             for (d, _) in icon.parts() {

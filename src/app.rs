@@ -1899,6 +1899,8 @@ impl App {
             Key::F11 => self.activate(Action::Fullscreen),
             Key::Letter(c) if ctrl => match (c, shift) {
                 ('c', false) => self.activate(Action::Copy),
+                // Undoes a Delete while its toast still offers Undo.
+                ('z', false) if self.edit.is_none() && self.pending_delete.is_some() => self.activate(Action::Undo),
                 ('o', false) if self.edit.is_none() => self.activate(Action::Open),
                 ('o', true) if self.edit.is_none() => self.activate(Action::OpenOnly),
                 ('b', _) if self.edit.is_none() => self.activate(Action::ShowFolder),

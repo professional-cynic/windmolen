@@ -161,11 +161,12 @@ fn header(app: &App, ui: &mut Ui, anchors: &mut Anchors) {
 
         let has = app.current().is_some();
         let marked = app.current_marks() != 0;
-        let buttons: [(Action, Icon, bool, bool, &str); 5] = [
+        let buttons: [(Action, Icon, bool, bool, &str); 6] = [
             (Action::MainMenu, Icon::OpenMenu, true, app.popover == Some(Popover::Main), "Main Menu (F10)"),
             (Action::Properties, Icon::Info, has, app.settings.properties, "Properties (F9)"),
             (Action::MarksMenu, if marked { Icon::BookmarkFilled } else { Icon::Bookmark }, true, app.popover == Some(Popover::Marks), "Marks (M)"),
             (Action::Edit, Icon::Edit, app.can_edit(), false, "Edit (E)"),
+            (Action::Delete, Icon::Trash, has && !app.busy(), false, "Move to Recycle Bin (Delete)"),
             (Action::Fullscreen, Icon::Fullscreen, true, false, "Fullscreen (F11)"),
         ];
         for (action, icon, enabled, checked, tip) in buttons {
@@ -831,6 +832,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Show all images in folder", "Ctrl+B"),
             ("Copy image", "Ctrl+C"),
             ("Move to Recycle Bin", "Delete"),
+            ("Undo move to Recycle Bin", "Ctrl+Z"),
             ("Main menu", "F10"),
             ("Preferences", "Ctrl+,"),
             ("Keyboard shortcuts", "Ctrl+?"),

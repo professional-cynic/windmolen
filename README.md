@@ -47,7 +47,8 @@ profiles (Display P3, Adobe RGB, …) are converted to sRGB.
 - **Copy** (Ctrl+C) puts the image on the clipboard both as a file, which Explorer
   pastes as a copy, and as a picture for Paint, Word or a chat. The picture is only
   decoded when a program pastes it.
-- **Delete** moves the image to the Recycle Bin, with **Undo** in the toast. The file
+- **Delete** (key, or the bin button in the header) moves the image to the Recycle
+  Bin, with **Undo** in the toast or Ctrl+Z. The file
   goes there once the toast is gone (or the window closes); where a drive has no
   Recycle Bin, Windows asks before deleting it for good.
 - Editing: rotate, flip and crop (free or fixed aspect ratios).
@@ -159,7 +160,7 @@ offline code signing (Authenticode), which needs a certificate.
 | Best fit / 100 % | F or Ctrl+0 / 0 or Ctrl+1 |
 | Toggle mark 1–9 | 1 … 9 |
 | Marks menu / remove marks / send | M / U / Ctrl+M |
-| Copy / move to Recycle Bin | Ctrl+C / Delete |
+| Copy / move to Recycle Bin / undo | Ctrl+C / Delete / Ctrl+Z |
 | Edit · rotate · flip | E · R, Shift+R · H, V (in edit) |
 | Save copy / cancel | Ctrl+S / Esc |
 | Properties · fullscreen · menu | F9 or I · F11 · F10 |
